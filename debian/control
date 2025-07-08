@@ -1,0 +1,18 @@
+Source: openlist
+Section: utils
+Priority: optional
+Maintainer: OpenList Team <team@openlist.io>
+Build-Depends: debhelper (>= 10)
+Standards-Version: 4.0.8
+Homepage: https://github.com/OpenListTeam/OpenList
+Vcs-Git: https://github.com/OpenListTeam/OpenList.git
+Vcs-Browser: https://github.com/OpenListTeam/OpenList
+
+Package: openlist
+Architecture: amd64 arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}, systemd
+Description: OpenList - A modern file management and sharing platform
+ OpenList is a powerful file management and sharing platform that provides
+ a web-based interface for managing files and directories. It supports
+ multiple storage backends and offers features like file sharing, user
+ management, and more.

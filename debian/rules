@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Extract binary from pre-downloaded archive
+	mkdir -p debian/tmp/var/lib/openlist
+	if [ -f "openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
+		tar -xzf "openlist-linux-$(DEB_HOST_ARCH).tar.gz" -C debian/tmp/var/lib/openlist; \
+	else \
+		echo "Error: Binary archive openlist-linux-$(DEB_HOST_ARCH).tar.gz not found"; \
+		exit 1; \
+	fi
+	chmod +x debian/tmp/var/lib/openlist/openlist
+
+override_dh_auto_install:
+	# Create symlink for command line access
+	mkdir -p debian/tmp/usr/local/bin
+	ln -sf /var/lib/openlist/openlist debian/tmp/usr/local/bin/openlist
+
+override_dh_auto_clean:
+	rm -f openlist-linux-*.tar.gz
+	dh_auto_clean

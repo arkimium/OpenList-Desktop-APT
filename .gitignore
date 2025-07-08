@@ -1,0 +1,30 @@
+# Build artifacts
+*.deb
+*.tar.gz
+*.orig.tar.gz
+*.changes
+*.dsc
+*.build
+*.buildinfo
+
+# Temporary files
+test_extract/
+debian/tmp/
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+
+# Backup files
+*~
+*.bak
+.#*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

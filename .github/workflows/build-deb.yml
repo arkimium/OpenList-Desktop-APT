@@ -1,0 +1,314 @@
+name: Build and Upload DEB Package
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC to check for new releases
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if no new version'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      tag_name: ${{ steps.get-version.outputs.tag_name }}
+      should_build: ${{ steps.check-build.outputs.should_build }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Get latest OpenList release
+      id: get-version
+      run: |
+        # Get latest release info from OpenList repository
+        RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList/releases/latest")
+        
+        # Extract version and tag name
+        TAG_NAME=$(echo "$RELEASE_INFO" | jq -r '.tag_name')
+        VERSION=${TAG_NAME#v}  # Remove 'v' prefix if present
+        
+        echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Latest OpenList version: $VERSION (tag: $TAG_NAME)"
+        
+    - name: Check if build is needed
+      id: check-build
+      run: |
+        VERSION="${{ steps.get-version.outputs.version }}"
+        FORCE_BUILD="${{ github.event.inputs.force_build }}"
+        
+        # Check if this version was already built
+        if [ "$FORCE_BUILD" = "true" ]; then
+          echo "Force build requested"
+          echo "should_build=true" >> $GITHUB_OUTPUT
+        else
+          # Check if release with this version already exists in current repo
+          EXISTING_RELEASE=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/v$VERSION" | jq -r '.tag_name // empty')
+          
+          if [ -z "$EXISTING_RELEASE" ]; then
+            echo "Version $VERSION not found in releases, building..."
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version $VERSION already exists, skipping build"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+  build-deb:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y debhelper devscripts build-essential wget jq
+        
+    - name: Download OpenList binary
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
+        ARCH="${{ matrix.arch }}"
+        
+        echo "Downloading OpenList $VERSION for $ARCH"
+        
+        # Download the binary archive
+        DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
+        echo "Download URL: $DOWNLOAD_URL"
+        
+        wget -O "openlist-linux-$ARCH.tar.gz" "$DOWNLOAD_URL"
+        
+        # Verify download
+        if [ ! -f "openlist-linux-$ARCH.tar.gz" ]; then
+          echo "Failed to download binary for $ARCH"
+          exit 1
+        fi
+        
+        # Extract and verify binary
+        mkdir -p test_extract
+        tar -xzf "openlist-linux-$ARCH.tar.gz" -C test_extract
+        
+        if [ ! -f "test_extract/openlist" ]; then
+          echo "Binary not found in archive"
+          exit 1
+        fi
+        
+        echo "Binary downloaded and verified successfully"
+        
+    - name: Prepare debian package
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
+        ARCH="${{ matrix.arch }}"
+        
+        # Update changelog with current version and proper description
+        cat > debian/changelog << EOF
+        openlist ($VERSION-1) unstable; urgency=medium
+
+          * DEB package built from OpenListTeam/OpenList $TAG_NAME
+          * Automated build for $ARCH architecture
+          * Binary downloaded from official release
+
+         -- OpenList Team <team@openlist.io>  $(date -R)
+        EOF
+        
+        # Make scripts executable
+        chmod +x debian/rules
+        chmod +x debian/postinst
+        chmod +x debian/prerm
+        chmod +x debian/postrm
+        
+        # Copy the downloaded binary to the expected location for debian/rules
+        cp "openlist-linux-$ARCH.tar.gz" ./
+        
+    - name: Build DEB package for ${{ matrix.arch }}
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        ARCH="${{ matrix.arch }}"
+        
+        # Set architecture for cross-compilation
+        export DEB_HOST_ARCH=$ARCH
+        
+        # Build the package
+        dpkg-buildpackage -us -uc -a$ARCH
+        
+    - name: Upload DEB artifact to build assets
+      uses: actions/upload-artifact@v4
+      with:
+        name: openlist-${{ needs.check-version.outputs.version }}-${{ matrix.arch }}.deb
+        path: openlist_${{ needs.check-version.outputs.version }}-1_${{ matrix.arch }}.deb
+        retention-days: 90
+        
+  create-release:
+    needs: [check-version, build-deb]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      
+    - name: Create GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        TAG_NAME="v$VERSION"
+        SOURCE_TAG="${{ needs.check-version.outputs.tag_name }}"
+        
+        # Create release with proper changelog
+        gh release create "$TAG_NAME" \
+          --title "OpenList DEB Package $VERSION" \
+          --notes "## DEB Package for OpenList $VERSION
+
+        This is an automated DEB package build from [OpenListTeam/OpenList $SOURCE_TAG](https://github.com/OpenListTeam/OpenList/releases/tag/$SOURCE_TAG).
+
+        ### 📦 Package Information
+        - **Source**: OpenListTeam/OpenList $SOURCE_TAG
+        - **Package Version**: $VERSION-1
+        - **Build Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        - **Architectures**: AMD64, ARM64
+
+        ### 🚀 Installation
+
+        #### Quick Install (AMD64)
+        \`\`\`bash
+        wget https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/openlist_${VERSION}-1_amd64.deb
+        sudo dpkg -i openlist_${VERSION}-1_amd64.deb
+        sudo apt-get install -f
+        \`\`\`
+
+        #### Quick Install (ARM64)
+        \`\`\`bash
+        wget https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/openlist_${VERSION}-1_arm64.deb
+        sudo dpkg -i openlist_${VERSION}-1_arm64.deb
+        sudo apt-get install -f
+        \`\`\`
+
+        #### From PPA (if configured)
+        \`\`\`bash
+        sudo add-apt-repository ppa:openlist/ppa
+        sudo apt update
+        sudo apt install openlist
+        \`\`\`
+
+        ### 🔧 Service Management
+        \`\`\`bash
+        # Check service status
+        sudo systemctl status openlist
+
+        # Start/stop/restart service
+        sudo systemctl start openlist
+        sudo systemctl stop openlist
+        sudo systemctl restart openlist
+
+        # View logs
+        sudo journalctl -u openlist -f
+        \`\`\`
+
+        ### 📁 File Locations
+        - **Binary**: \`/var/lib/openlist/openlist\`
+        - **Working Directory**: \`/var/lib/openlist\`
+        - **Service File**: \`/etc/systemd/system/openlist.service\`
+        - **Command Symlink**: \`/usr/local/bin/openlist\`
+
+        ### 🗑️ Uninstallation
+        \`\`\`bash
+        # Remove package but keep configuration
+        sudo apt remove openlist
+
+        # Remove package and all configuration/data
+        sudo apt purge openlist
+        \`\`\`
+
+        ---
+        **Note**: This package automatically downloads and installs the OpenList binary, creates a system user, sets up systemd service, and provides command-line access." \
+          openlist-$VERSION-amd64.deb/openlist_${VERSION}-1_amd64.deb \
+          openlist-$VERSION-arm64.deb/openlist_${VERSION}-1_arm64.deb
+
+  upload-to-ppa:
+    needs: [check-version, build-deb]
+    runs-on: ubuntu-latest
+    if: needs.check-version.outputs.should_build == 'true' && vars.ENABLE_PPA_UPLOAD == 'true'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y debhelper devscripts build-essential dput jq
+        
+    - name: Download OpenList source for PPA
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
+        
+        # Download source code
+        wget -O "openlist_${VERSION}.orig.tar.gz" \
+          "https://github.com/OpenListTeam/OpenList/archive/$TAG_NAME.tar.gz"
+        
+    - name: Set up GPG
+      env:
+        GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      run: |
+        echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+        echo "use-agent" >> ~/.gnupg/gpg.conf
+        echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+        echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+        echo RELOADAGENT | gpg-connect-agent
+        
+    - name: Build and upload source package to PPA
+      env:
+        LAUNCHPAD_EMAIL: ${{ secrets.LAUNCHPAD_EMAIL }}
+        GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
+        
+        # Configure dput for PPA upload
+        cat > ~/.dput.cf << EOF
+        [ppa]
+        fqdn = ppa.launchpad.net
+        method = ftp
+        incoming = ~openlist/ubuntu/ppa/
+        login = anonymous
+        allow_unsigned_uploads = 0
+        EOF
+        
+        # Update changelog for PPA with proper description
+        cat > debian/changelog << EOF
+        openlist ($VERSION-1) unstable; urgency=medium
+
+          * DEB package built from OpenListTeam/OpenList $TAG_NAME
+          * Automated build for PPA distribution
+          * Binary downloaded from official release
+
+         -- OpenList Team $(date -R)
+        EOF
+        
+        # Build source package
+        debuild -S -sa -k$GPG_KEY_ID
+        
+        # Upload to PPA
+        dput ppa ../openlist_${VERSION}-1_source.changes

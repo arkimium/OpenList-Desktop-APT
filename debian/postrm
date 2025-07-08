@@ -1,0 +1,22 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "purge" ]; then
+    # Remove user and group on purge
+    if getent passwd openlist >/dev/null; then
+        deluser openlist || true
+    fi
+    
+    if getent group openlist >/dev/null; then
+        delgroup openlist || true
+    fi
+    
+    # Remove data directory if empty
+    if [ -d "/var/lib/openlist" ]; then
+        rmdir /var/lib/openlist 2>/dev/null || true
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0

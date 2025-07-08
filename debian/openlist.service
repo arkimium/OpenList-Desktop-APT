@@ -1,0 +1,19 @@
+[Unit]
+Description=OpenList File Management Platform
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=openlist
+Group=openlist
+WorkingDirectory=/var/lib/openlist
+ExecStart=/var/lib/openlist/openlist server --force-bin-dir
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openlist
+
+[Install]
+WantedBy=multi-user.target

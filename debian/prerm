@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+# Stop the service before removal
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    systemctl stop openlist.service || true
+    systemctl disable openlist.service || true
+fi
+
+#DEBHELPER#
+
+exit 0

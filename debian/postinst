@@ -1,0 +1,29 @@
+#!/bin/bash
+set -e
+
+# Create openlist user and group if they don't exist
+if ! getent group openlist >/dev/null; then
+    addgroup --system openlist
+fi
+
+if ! getent passwd openlist >/dev/null; then
+    adduser --system --ingroup openlist --home /var/lib/openlist --shell /bin/false openlist
+fi
+
+# Set proper ownership and permissions
+chown -R openlist:openlist /var/lib/openlist
+chmod 755 /var/lib/openlist
+chmod 755 /var/lib/openlist/openlist
+
+# Enable and start the service
+systemctl daemon-reload
+systemctl enable openlist.service
+
+# Start the service if it's a fresh install
+if [ "$1" = "configure" ] && [ -z "$2" ]; then
+    systemctl start openlist.service
+fi
+
+#DEBHELPER#
+
+exit 0
