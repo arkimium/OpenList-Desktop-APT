@@ -1,24 +1,109 @@
 #!/usr/bin/make -f
 
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_CFLAGS_MAINT_APPEND  = -Wall -pedantic
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+# Get version and tag from environment or changelog
+DEB_VERSION := $(shell dpkg-parsechangelog -S Version | cut -d- -f1)
+SOURCE_TAG := v$(DEB_VERSION)
+
 %:
 	dh $@
 
 override_dh_auto_build:
-	# Extract binary from pre-downloaded archive
-	mkdir -p debian/tmp/var/lib/openlist
+	@echo "=== Debian Rules: override_dh_auto_build ==="
+	@echo "Package version: $(DEB_VERSION)"
+	@echo "Source tag: $(SOURCE_TAG)"
+	@echo "Architecture: $(DEB_HOST_ARCH)"
+	@echo "Build phase - preparing for installation"
+
+override_dh_auto_install:
+	@echo "=== Debian Rules: override_dh_auto_install ==="
+	@echo "Downloading binary for architecture: $(DEB_HOST_ARCH)"
+	if [ ! -f "openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
+		echo "Binary archive not found, downloading..."; \
+		echo "Download URL: https://github.com/OpenListTeam/OpenList/releases/download/$(SOURCE_TAG)/openlist-linux-$(DEB_HOST_ARCH).tar.gz"; \
+		wget -O "openlist-linux-$(DEB_HOST_ARCH).tar.gz" \
+			"https://github.com/OpenListTeam/OpenList/releases/download/$(SOURCE_TAG)/openlist-linux-$(DEB_HOST_ARCH).tar.gz" || \
+		(echo "Failed to download binary archive"; exit 1); \
+	fi
+	mkdir -p temp_extract
 	if [ -f "openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
-		tar -xzf "openlist-linux-$(DEB_HOST_ARCH).tar.gz" -C debian/tmp/var/lib/openlist; \
+		echo "Found binary archive: openlist-linux-$(DEB_HOST_ARCH).tar.gz"; \
+		echo "Archive size: $$(ls -lh openlist-linux-$(DEB_HOST_ARCH).tar.gz | awk '{print $$5}')"; \
+		echo "Extracting to temporary directory"; \
+		tar -xzf "openlist-linux-$(DEB_HOST_ARCH).tar.gz" -C temp_extract; \
+		echo "Extraction completed"; \
 	else \
 		echo "Error: Binary archive openlist-linux-$(DEB_HOST_ARCH).tar.gz not found"; \
 		exit 1; \
 	fi
-	chmod +x debian/tmp/var/lib/openlist/openlist
+	@echo "Checking extracted contents:"
+	@ls -la temp_extract/
+	if [ ! -f "temp_extract/openlist" ]; then \
+		echo "Error: openlist binary not found after extraction"; \
+		echo "Contents of extraction directory:"; \
+		find temp_extract/ -type f -exec ls -la {} \; || echo "Directory is empty"; \
+		echo "Checking what was in the archive:"; \
+		tar -tzf "openlist-linux-$(DEB_HOST_ARCH).tar.gz" || echo "Cannot list archive contents"; \
+		exit 1; \
+	fi
+	mkdir -p debian/openlist/var/lib/openlist
+	mkdir -p debian/openlist/usr/bin
+	mkdir -p debian/openlist/usr/lib/systemd/system
+	cp temp_extract/openlist debian/openlist/var/lib/openlist/
+	chmod +x debian/openlist/var/lib/openlist/openlist
+	cp debian/openlist.service debian/openlist/usr/lib/systemd/system/
+	echo '#!/bin/bash' > debian/openlist/usr/bin/openlist
+	echo '# OpenList wrapper script' >> debian/openlist/usr/bin/openlist
+	echo '# Automatically adds --force-bin-dir to all commands' >> debian/openlist/usr/bin/openlist
+	echo '' >> debian/openlist/usr/bin/openlist
+	echo 'BINARY="/var/lib/openlist/openlist"' >> debian/openlist/usr/bin/openlist
+	echo '' >> debian/openlist/usr/bin/openlist
+	echo '# Check if the binary exists' >> debian/openlist/usr/bin/openlist
+	echo 'if [ ! -x "$$BINARY" ]; then' >> debian/openlist/usr/bin/openlist
+	echo '    echo "Error: OpenList binary not found at $$BINARY"' >> debian/openlist/usr/bin/openlist
+	echo '    exit 1' >> debian/openlist/usr/bin/openlist
+	echo 'fi' >> debian/openlist/usr/bin/openlist
+	echo '' >> debian/openlist/usr/bin/openlist
+	echo '# Check if --force-bin-dir is already present in arguments' >> debian/openlist/usr/bin/openlist
+	echo 'if [[ "$$*" != *"--force-bin-dir"* ]]; then' >> debian/openlist/usr/bin/openlist
+	echo '    # Add --force-bin-dir to all commands' >> debian/openlist/usr/bin/openlist
+	echo '    exec "$$BINARY" "$$@" --force-bin-dir' >> debian/openlist/usr/bin/openlist
+	echo 'else' >> debian/openlist/usr/bin/openlist
+	echo '    # --force-bin-dir already present, pass through as-is' >> debian/openlist/usr/bin/openlist
+	echo '    exec "$$BINARY" "$$@"' >> debian/openlist/usr/bin/openlist
+	echo 'fi' >> debian/openlist/usr/bin/openlist
+	chmod +x debian/openlist/usr/bin/openlist
+	rm -rf temp_extract
+	@echo "Files installed to package directory:"
+	@find debian/openlist -type f -exec ls -la {} \;
+	@echo "Wrapper script content:"
+	@cat debian/openlist/usr/bin/openlist
 
-override_dh_auto_install:
-	# Create symlink for command line access
-	mkdir -p debian/tmp/usr/local/bin
-	ln -sf /var/lib/openlist/openlist debian/tmp/usr/local/bin/openlist
+override_dh_install:
+	@echo "Skipping dh_install - files already installed manually"
+
+override_dh_usrlocal:
+	@echo "Skipping dh_usrlocal - not using /usr/local"
+
+override_dh_strip:
+	@echo "Skipping dh_strip - Go binaries are already optimized and don't need stripping"
+
+override_dh_dwz:
+	@echo "Skipping dh_dwz - Go binaries don't need DWARF compression"
+
+override_dh_makeshlibs:
+	@echo "Skipping dh_makeshlibs - no shared libraries to process"
+
+override_dh_shlibdeps:
+	@echo "Skipping dh_shlibdeps - Go binaries are statically linked"
 
 override_dh_auto_clean:
 	rm -f openlist-linux-*.tar.gz
+	rm -rf temp_extract
 	dh_auto_clean
+
+override_dh_auto_test:
+	@echo "Skipping tests for cross-compilation"

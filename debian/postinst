@@ -1,19 +1,33 @@
 #!/bin/bash
 set -e
 
-# Create openlist user and group if they don't exist
+# Create openlist group if it doesn't exist
 if ! getent group openlist >/dev/null; then
     addgroup --system openlist
 fi
 
+# Create openlist user if it doesn't exist
 if ! getent passwd openlist >/dev/null; then
-    adduser --system --ingroup openlist --home /var/lib/openlist --shell /bin/false openlist
+    # Create user without specifying home directory first
+    adduser --system --ingroup openlist --no-create-home --shell /bin/false openlist
+fi
+
+# Ensure the home directory exists and has correct ownership
+if [ ! -d "/var/lib/openlist" ]; then
+    mkdir -p /var/lib/openlist
 fi
 
 # Set proper ownership and permissions
 chown -R openlist:openlist /var/lib/openlist
 chmod 755 /var/lib/openlist
-chmod 755 /var/lib/openlist/openlist
+
+# Set the home directory for the user (this avoids the creation conflict)
+usermod --home /var/lib/openlist openlist
+
+# Ensure binary is executable
+if [ -f "/var/lib/openlist/openlist" ]; then
+    chmod 755 /var/lib/openlist/openlist
+fi
 
 # Enable and start the service
 systemctl daemon-reload

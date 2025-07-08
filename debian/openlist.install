@@ -1,2 +1,2 @@
-var/lib/openlist/* /var/lib/openlist/
-usr/local/bin/openlist /usr/local/bin/
+# Files are installed manually in debian/rules
+# This file is kept empty to avoid dh_install conflicts

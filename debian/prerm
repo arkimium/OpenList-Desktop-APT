@@ -1,11 +1,23 @@
 #!/bin/bash
 set -e
 
-# Stop the service before removal
-if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
-    systemctl stop openlist.service || true
-    systemctl disable openlist.service || true
-fi
+case "$1" in
+    remove|upgrade|deconfigure)
+        # Stop the service before removal/upgrade
+        if systemctl is-active --quiet openlist.service 2>/dev/null; then
+            systemctl stop openlist.service || true
+        fi
+        ;;
+        
+    failed-upgrade)
+        # Do nothing
+        ;;
+        
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
 
 #DEBHELPER#
 

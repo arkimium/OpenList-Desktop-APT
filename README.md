@@ -10,7 +10,8 @@ This repository contains the Debian package configuration for OpenList, designed
 - **System Integration**: 
   - Installs to `/var/lib/openlist`
   - Creates systemd service for automatic startup
-  - Creates symlink at `/usr/local/bin/openlist` for command-line access
+  - Creates wrapper script at `/usr/bin/openlist` for command-line access
+  - Automatically adds `--force-bin-dir` to all commands
   - Manages user/group creation and cleanup
 - **GitHub Releases**: Automatically creates releases with DEB packages
 - **PPA Support**: Optional upload to Launchpad PPA
@@ -71,6 +72,7 @@ chmod +x build.sh
 
 - `-v, --version VERSION`: Set package version (default: fetch latest from GitHub)
 - `-a, --arch ARCH`: Set architecture (amd64 or arm64, default: amd64)
+- `-d, --debug`: Enable debug output
 - `-h, --help`: Show help message
 
 ## GitHub Actions Configuration
@@ -137,17 +139,23 @@ After installation, OpenList is available in the PATH:
 
 ```bash
 openlist --help
-openlist server --force-bin-dir
+openlist server
+openlist version
 ```
 
-The actual binary is located at `/var/lib/openlist/openlist` with a symlink at `/usr/local/bin/openlist`.
+**Important**: The `/usr/bin/openlist` command is a wrapper script that automatically adds `--force-bin-dir` to all commands. So when you run:
+- `openlist server` → actually executes `openlist server --force-bin-dir`
+- `openlist --help` → actually executes `openlist --help --force-bin-dir`
+- Any command → automatically gets `--force-bin-dir` appended
+
+The actual binary is located at `/var/lib/openlist/openlist` with a wrapper script at `/usr/bin/openlist`.
 
 ## File Locations
 
 - **Binary**: `/var/lib/openlist/openlist`
+- **Wrapper Script**: `/usr/bin/openlist`
 - **Working Directory**: `/var/lib/openlist`
 - **Service File**: `/etc/systemd/system/openlist.service`
-- **Command Symlink**: `/usr/local/bin/openlist`
 - **User/Group**: `openlist:openlist`
 
 ## Binary Sources
@@ -183,16 +191,46 @@ sudo chown -R openlist:openlist /var/lib/openlist
 sudo chmod 755 /var/lib/openlist/openlist
 ```
 
-### Binary Not Found
+### Wrapper Script Issues
 
-Verify the symlink exists:
+Check the wrapper script:
 ```bash
-ls -la /usr/local/bin/openlist
+cat /usr/bin/openlist
 ```
 
-If missing, recreate it:
+If the wrapper script is missing or corrupted, recreate it:
 ```bash
-sudo ln -sf /var/lib/openlist/openlist /usr/local/bin/openlist
+sudo tee /usr/bin/openlist << 'EOF'
+#!/bin/bash
+# OpenList wrapper script
+# Automatically adds --force-bin-dir to all commands
+
+BINARY="/var/lib/openlist/openlist"
+
+# Check if the binary exists
+if [ ! -x "$BINARY" ]; then
+    echo "Error: OpenList binary not found at $BINARY"
+    exit 1
+fi
+
+# Check if --force-bin-dir is already present in arguments
+if [[ "$*" != *"--force-bin-dir"* ]]; then
+    # Add --force-bin-dir to all commands
+    exec "$BINARY" "$@" --force-bin-dir
+else
+    # --force-bin-dir already present, pass through as-is
+    exec "$BINARY" "$@"
+fi
+EOF
+sudo chmod +x /usr/bin/openlist
+```
+
+### Direct Binary Access
+
+If you need to run the binary without the wrapper script:
+```bash
+/var/lib/openlist/openlist --help
+/var/lib/openlist/openlist server
 ```
 
 ## Development
@@ -203,6 +241,7 @@ sudo ln -sf /var/lib/openlist/openlist /usr/local/bin/openlist
 2. Run the build script: `./build.sh`
 3. Install the generated package: `sudo dpkg -i ../openlist_*.deb`
 4. Test the service: `sudo systemctl status openlist`
+5. Test the wrapper: `openlist --help`
 
 ### Contributing
 

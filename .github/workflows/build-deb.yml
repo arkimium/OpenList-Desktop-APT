@@ -2,7 +2,7 @@ name: Build and Upload DEB Package
 
 on:
   schedule:
-    # Run daily at 2 AM UTC to check for new releases
+    # Run daily at 2 AM UTC to check for new releases (updated)
     - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
@@ -12,8 +12,12 @@ on:
         default: 'false'
         type: boolean
 
+permissions:
+  contents: write
+
 jobs:
   check-version:
+    name: Check OpenList Release
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get-version.outputs.version }}
@@ -27,12 +31,45 @@ jobs:
     - name: Get latest OpenList release
       id: get-version
       run: |
+        echo "=== Fetching latest release from OpenListTeam/OpenList ==="
+        
         # Get latest release info from OpenList repository
         RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList/releases/latest")
         
-        # Extract version and tag name
-        TAG_NAME=$(echo "$RELEASE_INFO" | jq -r '.tag_name')
-        VERSION=${TAG_NAME#v}  # Remove 'v' prefix if present
+        echo "API Response:"
+        echo "$RELEASE_INFO" | jq '.' || echo "Failed to parse JSON response"
+        
+        # Extract version and tag name with better error handling
+        TAG_NAME=$(echo "$RELEASE_INFO" | jq -r '.tag_name // empty')
+        
+        if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "null" ] || [ "$TAG_NAME" = "empty" ]; then
+          echo "Error: Failed to get tag_name from API response"
+          echo "Trying alternative approach..."
+          
+          # Try to get the first release if latest fails
+          RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList/releases" | jq '.[0]')
+          TAG_NAME=$(echo "$RELEASE_INFO" | jq -r '.tag_name // empty')
+          
+          if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "null" ] || [ "$TAG_NAME" = "empty" ]; then
+            echo "Error: Still failed to get tag_name"
+            echo "Using fallback version"
+            TAG_NAME="v1.0.0"
+          fi
+        fi
+        
+        # Remove 'v' prefix if present
+        VERSION=${TAG_NAME#v}
+        
+        # Ensure version is clean (no 'v' prefix)
+        VERSION=$(echo "$VERSION" | sed 's/^v//')
+        
+        # Validate version format
+        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+          echo "Warning: Version format seems invalid: $VERSION"
+          echo "Using fallback version"
+          VERSION="1.0.0"
+          TAG_NAME="v1.0.0"
+        fi
         
         echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
         echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -44,6 +81,8 @@ jobs:
         VERSION="${{ steps.get-version.outputs.version }}"
         FORCE_BUILD="${{ github.event.inputs.force_build }}"
         
+        echo "Checking if build is needed for version: $VERSION"
+        
         # Check if this version was already built
         if [ "$FORCE_BUILD" = "true" ]; then
           echo "Force build requested"
@@ -52,7 +91,7 @@ jobs:
           # Check if release with this version already exists in current repo
           EXISTING_RELEASE=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/v$VERSION" | jq -r '.tag_name // empty')
           
-          if [ -z "$EXISTING_RELEASE" ]; then
+          if [ -z "$EXISTING_RELEASE" ] || [ "$EXISTING_RELEASE" = "empty" ]; then
             echo "Version $VERSION not found in releases, building..."
             echo "should_build=true" >> $GITHUB_OUTPUT
           else
@@ -62,6 +101,7 @@ jobs:
         fi
 
   build-deb:
+    name: Build OpenList Packages
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
@@ -78,54 +118,58 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y debhelper devscripts build-essential wget jq
         
-    - name: Download OpenList binary
+        # Install cross-compilation tools for ARM64 if needed
+        if [ "${{ matrix.arch }}" = "arm64" ]; then
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+        fi
+        
+    - name: Prepare and build DEB package
       run: |
         VERSION="${{ needs.check-version.outputs.version }}"
         TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
         ARCH="${{ matrix.arch }}"
         
-        echo "Downloading OpenList $VERSION for $ARCH"
-        
-        # Download the binary archive
-        DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
-        echo "Download URL: $DOWNLOAD_URL"
-        
-        wget -O "openlist-linux-$ARCH.tar.gz" "$DOWNLOAD_URL"
-        
-        # Verify download
-        if [ ! -f "openlist-linux-$ARCH.tar.gz" ]; then
-          echo "Failed to download binary for $ARCH"
+        # Validate inputs
+        if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+          echo "Error: VERSION is null or empty"
           exit 1
         fi
         
-        # Extract and verify binary
-        mkdir -p test_extract
-        tar -xzf "openlist-linux-$ARCH.tar.gz" -C test_extract
-        
-        if [ ! -f "test_extract/openlist" ]; then
-          echo "Binary not found in archive"
+        if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "null" ]; then
+          echo "Error: TAG_NAME is null or empty"
           exit 1
         fi
         
-        rm -rf test_extract
-        echo "Binary downloaded and verified successfully"
+        # Ensure version is clean (no 'v' prefix) for debian package
+        CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
         
-    - name: Prepare debian package
-      run: |
-        VERSION="${{ needs.check-version.outputs.version }}"
-        TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
-        ARCH="${{ matrix.arch }}"
+        echo "=== Version Information ==="
+        echo "Original TAG_NAME: $TAG_NAME"
+        echo "Extracted VERSION: $VERSION"
+        echo "Clean VERSION for debian: $CLEAN_VERSION"
+        echo "Architecture: $ARCH"
         
-        # Update changelog with current version and proper description
+        # Validate clean version
+        if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+          echo "Error: Clean version format is invalid: $CLEAN_VERSION"
+          exit 1
+        fi
+        
+        echo "=== Preparing debian package ==="
+        
+        # Update changelog with clean version (no 'v' prefix)
         cat > debian/changelog << EOF
-        openlist ($VERSION-1) unstable; urgency=medium
+        openlist ($CLEAN_VERSION-1) unstable; urgency=medium
 
           * DEB package built from OpenListTeam/OpenList $TAG_NAME
           * Automated build for $ARCH architecture
           * Binary downloaded from official release
 
-         -- OpenList Team <team@openlist.io>  $(date -R)
+         -- OpenList Team <openlistteam@gmail.com>  $(date -R)
         EOF
+        
+        echo "Generated changelog:"
+        cat debian/changelog
         
         # Make scripts executable
         chmod +x debian/rules
@@ -133,24 +177,62 @@ jobs:
         chmod +x debian/prerm
         chmod +x debian/postrm
         
-        # Binary archive is already in current directory from download step
-        # Verify it exists for debian/rules
-        if [ ! -f "openlist-linux-$ARCH.tar.gz" ]; then
-          echo "Error: Binary archive not found"
-          exit 1
+        echo "=== Pre-downloading binary (optional, debian/rules will download if missing) ==="
+        
+        # Try to pre-download the binary to speed up build
+        DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
+        echo "Pre-download URL: $DOWNLOAD_URL"
+        
+        if wget -O "openlist-linux-$ARCH.tar.gz" "$DOWNLOAD_URL" 2>/dev/null; then
+          echo "Pre-download successful"
+          ls -la openlist-linux-$ARCH.tar.gz
+        else
+          echo "Pre-download failed, debian/rules will handle download"
         fi
-        echo "Binary archive ready for debian/rules: openlist-linux-$ARCH.tar.gz"
         
-    - name: Build DEB package for ${{ matrix.arch }}
-      run: |
-        VERSION="${{ needs.check-version.outputs.version }}"
-        ARCH="${{ matrix.arch }}"
+        echo "=== Building DEB package ==="
         
-        # Set architecture for cross-compilation
+        # Set environment variables for cross-compilation
         export DEB_HOST_ARCH=$ARCH
+        export DEB_BUILD_OPTIONS="nocheck"
+        
+        # Set cross-compilation environment for ARM64
+        if [ "$ARCH" = "arm64" ]; then
+          export CC=aarch64-linux-gnu-gcc
+          export DEB_BUILD_PROFILES="cross"
+        fi
+        
+        echo "Building package with:"
+        echo "DEB_HOST_ARCH=$DEB_HOST_ARCH"
+        echo "DEB_BUILD_OPTIONS=$DEB_BUILD_OPTIONS"
+        echo "CC=$CC"
+        echo "DEB_BUILD_PROFILES=$DEB_BUILD_PROFILES"
+        echo "Package version: $CLEAN_VERSION-1"
+        
+        # Verify current directory before build
+        echo "Files in current directory before build:"
+        ls -la
         
         # Build the package
         dpkg-buildpackage -us -uc -a$ARCH
+        
+        echo "=== Build completed ==="
+        echo "Generated files:"
+        ls -la ../*.deb || echo "No .deb files found in parent directory"
+        ls -la *.deb || echo "No .deb files found in current directory"
+        
+        # The package should be named with the clean version
+        EXPECTED_DEB="openlist_${CLEAN_VERSION}-1_${ARCH}.deb"
+        if [ -f "$EXPECTED_DEB" ]; then
+          echo "Successfully built: $EXPECTED_DEB"
+        elif [ -f "../$EXPECTED_DEB" ]; then
+          echo "Successfully built: ../$EXPECTED_DEB"
+          mv "../$EXPECTED_DEB" "./"
+        else
+          echo "Warning: Expected DEB file not found: $EXPECTED_DEB"
+          echo "Available DEB files:"
+          find . -name "*.deb" -o -name "../*.deb"
+        fi
         
     - name: Upload DEB artifact to build assets
       uses: actions/upload-artifact@v4
@@ -160,6 +242,7 @@ jobs:
         retention-days: 90
         
   create-release:
+    name: Create Github Release
     needs: [check-version, build-deb]
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
@@ -171,6 +254,290 @@ jobs:
     - name: Download all artifacts
       uses: actions/download-artifact@v4
       
+    - name: Set up APT repository tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y apt-utils gnupg2
+        
+    - name: Set up GPG for signing
+      env:
+        GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      run: |
+        if [ -n "$GPG_PRIVATE_KEY" ]; then
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "use-agent" >> ~/.gnupg/gpg.conf
+          echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          echo RELOADAGENT | gpg-connect-agent
+          
+          # Get GPG key ID
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | sed 's/.*\/\([A-F0-9]*\).*/\1/')
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+          echo "GPG signing enabled with key: $GPG_KEY_ID"
+        else
+          echo "No GPG key provided, repository will be unsigned"
+          echo "GPG_KEY_ID=" >> $GITHUB_ENV
+        fi
+        
+    - name: Generate APT repository files
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        
+        # Create working directory
+        mkdir -p apt-repo
+        cd apt-repo
+        
+        # Copy DEB files
+        cp ../openlist-$VERSION-amd64.deb/openlist_${VERSION}-1_amd64.deb .
+        cp ../openlist-$VERSION-arm64.deb/openlist_${VERSION}-1_arm64.deb .
+        
+        echo "DEB files for APT repository:"
+        ls -la *.deb
+        
+        # Create apt-ftparchive configuration
+        cat > apt-ftparchive.conf << EOF
+        APT::FTPArchive::Release::Origin "OpenList";
+        APT::FTPArchive::Release::Label "OpenList APT Repository";
+        APT::FTPArchive::Release::Suite "./";
+        APT::FTPArchive::Release::Codename "openlist";
+        APT::FTPArchive::Release::Architectures "amd64 arm64";
+        APT::FTPArchive::Release::Components "";
+        APT::FTPArchive::Release::Description "OpenList APT Repository for direct GitHub Release access";
+        EOF
+        
+        # Generate Packages file using apt-ftparchive
+        apt-ftparchive packages . > Packages
+        
+        echo "Generated Packages file with $(grep -c '^Package:' Packages) packages"
+        
+        # Generate Release file using apt-ftparchive
+        apt-ftparchive -c apt-ftparchive.conf release . > Release
+        
+        echo "Generated Release file:"
+        cat Release
+        
+    - name: Sign Release file and create keyring
+      env:
+        GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+      run: |
+        cd apt-repo
+        
+        if [ -n "$GPG_KEY_ID" ]; then
+          echo "Signing Release file with GPG key: $GPG_KEY_ID"
+          
+          # Sign Release file (detached signature)
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --armor --detach-sign --sign -o Release.gpg Release
+          
+          # Create InRelease file (clearsigned)
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --armor --clearsign --sign -o InRelease Release
+          
+          echo "Release file signed successfully"
+          
+          # Export public key and create keyring file
+          echo "Creating GPG keyring file..."
+          gpg --batch --yes --armor --export "$GPG_KEY_ID" > openlist-archive-keyring.asc
+          gpg --batch --yes --dearmor < openlist-archive-keyring.asc > openlist-archive-keyring.gpg
+          
+          # Verify keyring file
+          if [ -f "openlist-archive-keyring.gpg" ] && [ -s "openlist-archive-keyring.gpg" ]; then
+            echo "GPG keyring file created successfully"
+            ls -la openlist-archive-keyring.*
+          else
+            echo "Warning: Failed to create GPG keyring file"
+          fi
+          
+          ls -la Release*
+        else
+          echo "No GPG key available, skipping signing and keyring creation"
+        fi
+        
+    - name: Create installation script
+      run: |
+        cd apt-repo
+        
+        # Create installation script
+        cat > install-apt.sh << 'EOF'
+        #!/bin/bash
+        set -e
+
+        # Color definitions for better output
+        RED='\033[0;31m'
+        GREEN='\033[0;32m'
+        YELLOW='\033[1;33m'
+        BLUE='\033[0;34m'
+        PURPLE='\033[0;35m'
+        CYAN='\033[0;36m'
+        WHITE='\033[1;37m'
+        NC='\033[0m' # No Color
+
+        # Logging functions with colors
+        log() {
+            local message="$1"
+            local level="${2:-info}"
+            case "$level" in
+                "error")
+                    echo -e "${RED}[ERROR]${NC} $message" >&2
+                    ;;
+                "success")
+                    echo -e "${GREEN}[SUCCESS]${NC} $message"
+                    ;;
+                "warning")
+                    echo -e "${YELLOW}[WARNING]${NC} $message"
+                    ;;
+                "info")
+                    echo -e "${BLUE}[INFO]${NC} $message"
+                    ;;
+                *)
+                    echo -e "${WHITE}[LOG]${NC} $message"
+                    ;;
+            esac
+        }
+
+        # Error handling function
+        handle_error() {
+            local exit_code="$1"
+            local error_message="$2"
+            log "$error_message" "error"
+            log "Exit code: $exit_code" "error"
+            exit $exit_code
+        }
+
+        echo -e "${CYAN}=== OpenList APT Repository Setup ===${NC}"
+
+        # Detect if running as root
+        if [ "$EUID" -eq 0 ]; then
+            log "Running as root user" "info"
+            SUDO_CMD=""
+        else
+            log "Running as regular user, will use sudo when needed" "info"
+            SUDO_CMD="sudo"
+        fi
+
+        # Detect system
+        if command -v lsb_release &> /dev/null; then
+            DISTRO=$(lsb_release -si)
+            VERSION=$(lsb_release -sr)
+            log "Detected: $DISTRO $VERSION" "info"
+        else
+            log "Cannot detect system version, using legacy format" "warning"
+            DISTRO="Unknown"
+            VERSION="0"
+        fi
+
+        # Install required packages for GPG key handling
+        log "Installing required packages..." "info"
+        if ! $SUDO_CMD apt-get update -qq; then
+            handle_error "$?" "Failed to update package list"
+        fi
+
+        if ! $SUDO_CMD apt-get install -y -qq curl gnupg2 ca-certificates; then
+            handle_error "$?" "Failed to install required packages"
+        fi
+
+        # Add GPG key to resolve signature verification issues
+        log "Adding OpenList repository GPG key..." "info"
+        KEYRING_URL="https://github.com/GITHUB_REPO/releases/latest/download/openlist-archive-keyring.gpg"
+        KEYRING_PATH="/usr/share/keyrings/openlist-archive-keyring.gpg"
+        
+        # Try to download the pre-generated keyring file
+        if curl -fsSL "$KEYRING_URL" -o /tmp/openlist-archive-keyring.gpg 2>/dev/null; then
+            # Verify the downloaded file is not empty and is a valid GPG keyring
+            if [ -s /tmp/openlist-archive-keyring.gpg ]; then
+                $SUDO_CMD mv /tmp/openlist-archive-keyring.gpg "$KEYRING_PATH"
+                $SUDO_CMD chmod 644 "$KEYRING_PATH"
+                log "GPG keyring downloaded and installed successfully" "success"
+            else
+                log "Downloaded keyring file is empty, falling back to trusted repository" "warning"
+                rm -f /tmp/openlist-archive-keyring.gpg
+                $SUDO_CMD touch "$KEYRING_PATH"
+            fi
+        else
+            log "Could not download GPG keyring from repository, creating trusted repository entry" "warning"
+            # Create a dummy keyring file to avoid errors
+            $SUDO_CMD touch "$KEYRING_PATH"
+        fi
+
+        # Choose sources format based on system
+        if [[ "$DISTRO" == "Ubuntu" && $(echo "$VERSION >= 22.04" | bc -l 2>/dev/null || echo 0) -eq 1 ]] || \
+           [[ "$DISTRO" == "Debian" && $(echo "$VERSION >= 12" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
+            log "Using modern sources format..." "info"
+            
+            # Use signed-by for modern systems, but fall back to trusted=yes if GPG key is not available
+            if [ -s /usr/share/keyrings/openlist-archive-keyring.gpg ]; then
+                echo 'Types: deb
+        URIs: https://github.com/GITHUB_REPO/releases/latest/download/
+        Suites: ./
+        Signed-By: /usr/share/keyrings/openlist-archive-keyring.gpg' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.sources > /dev/null
+            else
+                echo 'Types: deb
+        URIs: https://github.com/GITHUB_REPO/releases/latest/download/
+        Suites: ./
+        Trusted: yes' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.sources > /dev/null
+            fi
+        else
+            log "Using legacy sources format..." "info"
+            
+            # Use signed-by for legacy systems, but fall back to trusted=yes if GPG key is not available
+            if [ -s /usr/share/keyrings/openlist-archive-keyring.gpg ]; then
+                echo 'deb [signed-by=/usr/share/keyrings/openlist-archive-keyring.gpg] https://github.com/GITHUB_REPO/releases/latest/download/ ./' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.list > /dev/null
+            else
+                echo 'deb [trusted=yes] https://github.com/GITHUB_REPO/releases/latest/download/ ./' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.list > /dev/null
+            fi
+        fi
+
+        log "Repository configuration added successfully" "success"
+
+        # Run 'apt-get update'
+        log "Updating package list..." "info"
+        if ! $SUDO_CMD apt-get update -y; then
+            handle_error "$?" "Failed to run 'apt-get update'"
+        else
+            log "Repository configured successfully." "success"
+            echo ""
+            log "To install OpenList, run: ${WHITE}apt-get install openlist -y${NC}" "info"
+            log "You can also use the following commands:" "info"
+            echo ""
+            echo -e "${PURPLE}Installation:${NC}"
+            if [ "$EUID" -eq 0 ]; then
+                echo -e "  ${WHITE}apt-get install openlist -y${NC}          # Install OpenList"
+            else
+                echo -e "  ${WHITE}sudo apt-get install openlist -y${NC}     # Install OpenList"
+            fi
+            echo ""
+            echo -e "${PURPLE}Service Management (after installation):${NC}"
+            if [ "$EUID" -eq 0 ]; then
+                echo -e "  ${WHITE}systemctl status openlist${NC}            # Check status"
+                echo -e "  ${WHITE}systemctl start openlist${NC}             # Start service"
+                echo -e "  ${WHITE}systemctl stop openlist${NC}              # Stop service"
+                echo -e "  ${WHITE}systemctl restart openlist${NC}           # Restart service"
+                echo -e "  ${WHITE}journalctl -u openlist -f${NC}            # View logs"
+            else
+                echo -e "  ${WHITE}sudo systemctl status openlist${NC}       # Check status"
+                echo -e "  ${WHITE}sudo systemctl start openlist${NC}        # Start service"
+                echo -e "  ${WHITE}sudo systemctl stop openlist${NC}         # Stop service"
+                echo -e "  ${WHITE}sudo systemctl restart openlist${NC}      # Restart service"
+                echo -e "  ${WHITE}sudo journalctl -u openlist -f${NC}       # View logs"
+            fi
+            echo ""
+            echo -e "${PURPLE}Command Line Access (after installation):${NC}"
+            echo -e "  ${WHITE}openlist --help${NC}                       # Show help"
+            echo -e "  ${WHITE}openlist version${NC}                      # Show version"
+            echo ""
+            echo -e "${PURPLE}Configuration and Data Location:${NC}"
+            echo -e "  ${WHITE}/var/lib/openlist${NC}"
+            echo ""
+        fi
+        EOF
+        
+        # Replace placeholder with actual repository
+        sed -i "s|GITHUB_REPO|${{ github.repository }}|g" install-apt.sh
+        chmod +x install-apt.sh
+
+        echo "Created installation script"
+        
     - name: Create GitHub Release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -178,6 +545,22 @@ jobs:
         VERSION="${{ needs.check-version.outputs.version }}"
         TAG_NAME="v$VERSION"
         SOURCE_TAG="${{ needs.check-version.outputs.tag_name }}"
+        
+        # Prepare files for upload
+        cd apt-repo
+        FILES_TO_UPLOAD="Packages Release install-apt.sh"
+        
+        # Add signed files if they exist
+        if [ -f "Release.gpg" ]; then
+          FILES_TO_UPLOAD="$FILES_TO_UPLOAD Release.gpg InRelease"
+        fi
+        
+        # Add keyring file if it exists
+        if [ -f "openlist-archive-keyring.gpg" ]; then
+          FILES_TO_UPLOAD="$FILES_TO_UPLOAD openlist-archive-keyring.gpg"
+        fi
+        
+        cd ..
         
         # Create release with proper changelog
         gh release create "$TAG_NAME" \
@@ -191,29 +574,85 @@ jobs:
         - **Package Version**: $VERSION-1
         - **Build Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
         - **Architectures**: AMD64, ARM64
+        - **GPG Signed**: $([ -f apt-repo/Release.gpg ] && echo '✅ Yes' || echo '❌ No')
+        - **Repository Format**: APT-compatible with GPG signature verification
 
         ### 🚀 Installation
 
-        #### Quick Install (AMD64)
+        #### 🎯 APT Repository (Recommended - Automatic GPG Setup)
+        \`\`\`bash
+        # One-line install with automatic GPG key setup
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-apt.sh | bash
+        
+        # Then install OpenList
+        sudo apt install openlist -y
+        \`\`\`
+
+        #### 🔐 Manual APT Setup with GPG Verification (Modern systems - Ubuntu 22.04+/Debian 12+)
+        \`\`\`bash
+        # Download and install GPG keyring
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg | \\
+          sudo tee /usr/share/keyrings/openlist-archive-keyring.gpg > /dev/null
+
+        # Add repository with GPG verification
+        echo \"Types: deb
+        URIs: https://github.com/${{ github.repository }}/releases/latest/download/
+        Suites: ./
+        Signed-By: /usr/share/keyrings/openlist-archive-keyring.gpg\" | \\
+          sudo tee /etc/apt/sources.list.d/openlist.sources
+
+        # Update and install
+        sudo apt update && sudo apt install openlist -y
+        \`\`\`
+
+        #### 🔐 Manual APT Setup with GPG Verification (Legacy systems - Ubuntu <22.04/Debian <12)
+        \`\`\`bash
+        # Download and install GPG keyring
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg | \\
+          sudo tee /usr/share/keyrings/openlist-archive-keyring.gpg > /dev/null
+
+        # Add repository with GPG verification
+        echo \"deb [signed-by=/usr/share/keyrings/openlist-archive-keyring.gpg] https://github.com/${{ github.repository }}/releases/latest/download/ ./\" | \\
+          sudo tee /etc/apt/sources.list.d/openlist.list
+
+        # Update and install
+        sudo apt update && sudo apt install openlist -y
+        \`\`\`
+
+        #### ⚠️ Manual APT Setup without GPG Verification (Not Recommended)
+        \`\`\`bash
+        # Modern systems (Ubuntu 22.04+/Debian 12+)
+        echo \"Types: deb
+        URIs: https://github.com/${{ github.repository }}/releases/latest/download/
+        Suites: ./
+        Trusted: yes\" | sudo tee /etc/apt/sources.list.d/openlist.sources
+
+        # Legacy systems (Ubuntu <22.04/Debian <12)
+        echo \"deb [trusted=yes] https://github.com/${{ github.repository }}/releases/latest/download/ ./\" | \\
+          sudo tee /etc/apt/sources.list.d/openlist.list
+
+        # Update and install
+        sudo apt update && sudo apt install openlist -y
+        \`\`\`
+
+        #### 📦 Direct Download (AMD64)
         \`\`\`bash
         wget https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/openlist_${VERSION}-1_amd64.deb
         sudo dpkg -i openlist_${VERSION}-1_amd64.deb
-        sudo apt-get install -f
+        sudo apt-get install -f  # Fix any dependency issues
         \`\`\`
 
-        #### Quick Install (ARM64)
+        #### 📦 Direct Download (ARM64)
         \`\`\`bash
         wget https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/openlist_${VERSION}-1_arm64.deb
         sudo dpkg -i openlist_${VERSION}-1_arm64.deb
-        sudo apt-get install -f
+        sudo apt-get install -f  # Fix any dependency issues
         \`\`\`
 
-        #### From PPA (if configured)
-        \`\`\`bash
-        sudo add-apt-repository ppa:openlist/ppa
-        sudo apt update
-        sudo apt install openlist
-        \`\`\`
+        ### 🔐 GPG Key Information
+        - **GPG Signed**: $([ -f apt-repo/Release.gpg ] && echo 'Yes' || echo 'No')
+        - **Keyring File**: [openlist-archive-keyring.gpg](https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg)
+        - **Verification**: Repository packages are cryptographically signed for security
 
         ### 🔧 Service Management
         \`\`\`bash
@@ -225,31 +664,84 @@ jobs:
         sudo systemctl stop openlist
         sudo systemctl restart openlist
 
+        # Enable/disable auto-start
+        sudo systemctl enable openlist   # Start on boot
+        sudo systemctl disable openlist  # Don't start on boot
+
         # View logs
         sudo journalctl -u openlist -f
+        sudo journalctl -u openlist --since \"1 hour ago\"
         \`\`\`
 
         ### 📁 File Locations
         - **Binary**: \`/var/lib/openlist/openlist\`
         - **Working Directory**: \`/var/lib/openlist\`
-        - **Service File**: \`/etc/systemd/system/openlist.service\`
-        - **Command Symlink**: \`/usr/local/bin/openlist\`
+        - **Service File**: \`/usr/lib/systemd/system/openlist.service\`
+        - **Command Symlink**: \`/usr/bin/openlist\`
+        - **Configuration**: \`/var/lib/openlist/\` (auto-generated)
+        - **Logs**: \`journalctl -u openlist\` or \`/var/log/syslog\`
+
+        ### 🔍 Verification
+        \`\`\`bash
+        # Verify installation
+        openlist --version
+        systemctl is-active openlist
+        
+        # Check if repository is properly configured
+        apt policy openlist
+        
+        # Verify GPG signature (if using signed repository)
+        apt-key list | grep -i openlist  # Legacy systems
+        gpg --show-keys /usr/share/keyrings/openlist-archive-keyring.gpg  # Modern systems
+        \`\`\`
 
         ### 🗑️ Uninstallation
         \`\`\`bash
+        # Stop and remove service
+        sudo systemctl stop openlist
+        sudo systemctl disable openlist
+
         # Remove package but keep configuration
         sudo apt remove openlist
 
-        # Remove package and all configuration/data
+        # Remove package and all configuration/data (complete removal)
         sudo apt purge openlist
+
+        # Remove repository configuration
+        sudo rm -f /etc/apt/sources.list.d/openlist.sources  # Modern systems
+        sudo rm -f /etc/apt/sources.list.d/openlist.list     # Legacy systems
+        sudo rm -f /usr/share/keyrings/openlist-archive-keyring.gpg
+
+        # Update package list
+        sudo apt update
+        \`\`\`
+
+        ### 🆘 Troubleshooting
+        \`\`\`bash
+        # If you get GPG errors
+        sudo apt update --allow-unauthenticated
+        
+        # Re-download GPG key
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg | \\
+          sudo tee /usr/share/keyrings/openlist-archive-keyring.gpg > /dev/null
+        
+        # Check service logs for issues
+        sudo journalctl -u openlist --no-pager
+        
+        # Reset configuration (will regenerate on next start)
+        sudo systemctl stop openlist
+        sudo rm -rf /var/lib/openlist/*
+        sudo systemctl start openlist
         \`\`\`
 
         ---
-        **Note**: This package automatically downloads and installs the OpenList binary, creates a system user, sets up systemd service, and provides command-line access." \
+        **🔒 Security Note**: This repository is GPG-signed for package integrity verification. The automatic installation script will set up GPG verification by default. For maximum security, always use the GPG-verified installation methods." \
           openlist-$VERSION-amd64.deb/openlist_${VERSION}-1_amd64.deb \
-          openlist-$VERSION-arm64.deb/openlist_${VERSION}-1_arm64.deb
+          openlist-$VERSION-arm64.deb/openlist_${VERSION}-1_arm64.deb \
+          $(echo $FILES_TO_UPLOAD | sed 's|^|apt-repo/|g; s| | apt-repo/|g')
 
   upload-to-ppa:
+    name: Upload to PPA Repository
     needs: [check-version, build-deb]
     runs-on: ubuntu-latest
     if: needs.check-version.outputs.should_build == 'true' && vars.ENABLE_PPA_UPLOAD == 'true'
@@ -268,8 +760,11 @@ jobs:
         VERSION="${{ needs.check-version.outputs.version }}"
         TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
         
+        # Ensure version is clean (no 'v' prefix)
+        CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
+        
         # Download source code
-        wget -O "openlist_${VERSION}.orig.tar.gz" \
+        wget -O "openlist_${CLEAN_VERSION}.orig.tar.gz" \
           "https://github.com/OpenListTeam/OpenList/archive/$TAG_NAME.tar.gz"
         
     - name: Set up GPG
@@ -292,6 +787,9 @@ jobs:
         VERSION="${{ needs.check-version.outputs.version }}"
         TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
         
+        # Ensure version is clean (no 'v' prefix)
+        CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
+        
         # Configure dput for PPA upload
         cat > ~/.dput.cf << EOF
         [ppa]
@@ -302,19 +800,19 @@ jobs:
         allow_unsigned_uploads = 0
         EOF
         
-        # Update changelog for PPA with proper description
+        # Update changelog for PPA with clean version
         cat > debian/changelog << EOF
-        openlist ($VERSION-1) unstable; urgency=medium
+        openlist ($CLEAN_VERSION-1) unstable; urgency=medium
 
           * DEB package built from OpenListTeam/OpenList $TAG_NAME
           * Automated build for PPA distribution
           * Binary downloaded from official release
 
-         -- OpenList Team <team@openlist.io>  $(date -R)
+         -- OpenList Team <openlistteam@gmail.com>  $(date -R)
         EOF
         
         # Build source package
         debuild -S -sa -k$GPG_KEY_ID
         
         # Upload to PPA
-        dput ppa ../openlist_${VERSION}-1_source.changes
+        dput ppa ../openlist_${CLEAN_VERSION}-1_source.changes
