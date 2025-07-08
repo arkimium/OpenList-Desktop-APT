@@ -107,6 +107,7 @@ jobs:
           exit 1
         fi
         
+        rm -rf test_extract
         echo "Binary downloaded and verified successfully"
         
     - name: Prepare debian package
@@ -132,8 +133,13 @@ jobs:
         chmod +x debian/prerm
         chmod +x debian/postrm
         
-        # Copy the downloaded binary to the expected location for debian/rules
-        cp "openlist-linux-$ARCH.tar.gz" ./
+        # Binary archive is already in current directory from download step
+        # Verify it exists for debian/rules
+        if [ ! -f "openlist-linux-$ARCH.tar.gz" ]; then
+          echo "Error: Binary archive not found"
+          exit 1
+        fi
+        echo "Binary archive ready for debian/rules: openlist-linux-$ARCH.tar.gz"
         
     - name: Build DEB package for ${{ matrix.arch }}
       run: |
@@ -304,7 +310,7 @@ jobs:
           * Automated build for PPA distribution
           * Binary downloaded from official release
 
-         -- OpenList Team $(date -R)
+         -- OpenList Team <team@openlist.io>  $(date -R)
         EOF
         
         # Build source package
