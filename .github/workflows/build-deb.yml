@@ -813,6 +813,42 @@ jobs:
         echo "Prepared source directory:"
         ls -la openlist-${CLEAN_VERSION}/
         
+    - name: Download OpenList binaries for PPA
+      run: |
+        VERSION="${{ needs.check-version.outputs.version }}"
+        TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
+        
+        # Ensure version is clean (no 'v' prefix)
+        CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
+        
+        echo "=== Downloading OpenList binaries for PPA build ==="
+        echo "VERSION: $VERSION"
+        echo "TAG_NAME: $TAG_NAME"
+        echo "CLEAN_VERSION: $CLEAN_VERSION"
+        
+        # Enter source directory
+        cd openlist-${CLEAN_VERSION}
+        
+        # Download binaries for both architectures that PPA will need
+        for ARCH in amd64 arm64; do
+          BINARY_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
+          echo "Downloading binary for $ARCH from: $BINARY_URL"
+          
+          if wget -O "openlist-linux-$ARCH.tar.gz" "$BINARY_URL"; then
+            echo "Successfully downloaded openlist-linux-$ARCH.tar.gz"
+            echo "File size: $(ls -lh openlist-linux-$ARCH.tar.gz | awk '{print $5}')"
+          else
+            echo "Error: Failed to download openlist-linux-$ARCH.tar.gz"
+            exit 1
+          fi
+        done
+        
+        echo "Downloaded binaries:"
+        ls -la openlist-linux-*.tar.gz
+        
+        # Go back to parent directory
+        cd ..
+        
     - name: Set up GPG
       env:
         GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
