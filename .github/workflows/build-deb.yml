@@ -588,6 +588,16 @@ jobs:
         sudo apt install openlist -y
         \`\`\`
 
+        #### 📦 PPA Repository (Alternative - Launchpad)
+        \`\`\`bash
+        # Add PPA repository
+        sudo add-apt-repository ppa:openlist/server
+        sudo apt update
+        
+        # Install OpenList
+        sudo apt install openlist -y
+        \`\`\`
+
         #### 🔐 Manual APT Setup with GPG Verification (Modern systems - Ubuntu 22.04+/Debian 12+)
         \`\`\`bash
         # Download and install GPG keyring
@@ -763,9 +773,42 @@ jobs:
         # Ensure version is clean (no 'v' prefix)
         CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
         
-        # Download source code
+        echo "=== Preparing source package for PPA ==="
+        echo "VERSION: $VERSION"
+        echo "TAG_NAME: $TAG_NAME"
+        echo "CLEAN_VERSION: $CLEAN_VERSION"
+        
+        # Download source code with correct naming for PPA
+        echo "Downloading source from: https://github.com/OpenListTeam/OpenList/archive/$TAG_NAME.tar.gz"
         wget -O "openlist_${CLEAN_VERSION}.orig.tar.gz" \
           "https://github.com/OpenListTeam/OpenList/archive/$TAG_NAME.tar.gz"
+        
+        # Verify the downloaded file
+        if [ ! -f "openlist_${CLEAN_VERSION}.orig.tar.gz" ]; then
+          echo "Error: Failed to download source archive"
+          exit 1
+        fi
+        
+        echo "Downloaded source archive:"
+        ls -la openlist_${CLEAN_VERSION}.orig.tar.gz
+        
+        # Extract and prepare source directory
+        tar -xzf "openlist_${CLEAN_VERSION}.orig.tar.gz"
+        
+        # The extracted directory will be named OpenList-$TAG_NAME (without 'v' prefix)
+        EXTRACTED_DIR="OpenList-${TAG_NAME#v}"
+        if [ ! -d "$EXTRACTED_DIR" ]; then
+          echo "Error: Expected directory $EXTRACTED_DIR not found"
+          echo "Available directories:"
+          ls -la
+          exit 1
+        fi
+        
+        # Rename to match debian package naming convention
+        mv "$EXTRACTED_DIR" "openlist-${CLEAN_VERSION}"
+        
+        echo "Prepared source directory:"
+        ls -la openlist-${CLEAN_VERSION}/
         
     - name: Set up GPG
       env:
@@ -800,6 +843,13 @@ jobs:
         allow_unsigned_uploads = 0
         EOF
         
+        # Copy debian directory to source directory
+        echo "Copying debian packaging files..."
+        cp -r debian openlist-${CLEAN_VERSION}/
+        
+        # Enter source directory
+        cd openlist-${CLEAN_VERSION}
+        
         # Update changelog for PPA with clean version
         cat > debian/changelog << EOF
         openlist ($CLEAN_VERSION-1) unstable; urgency=medium
@@ -811,8 +861,18 @@ jobs:
          -- OpenList Team <openlistteam@gmail.com>  $(date -R)
         EOF
         
+        echo "Building source package in directory: $(pwd)"
+        echo "Files in current directory:"
+        ls -la
+        
         # Build source package
         debuild -S -sa -k$GPG_KEY_ID
         
+        # Go back to parent directory for upload
+        cd ..
+        
+        echo "Generated files for PPA upload:"
+        ls -la openlist_${CLEAN_VERSION}-1*
+        
         # Upload to PPA
-        dput ppa ../openlist_${CLEAN_VERSION}-1_source.changes
+        dput ppa openlist_${CLEAN_VERSION}-1_source.changes
