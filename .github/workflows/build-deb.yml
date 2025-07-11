@@ -795,7 +795,7 @@ jobs:
         [ppa]
         fqdn = ppa.launchpad.net
         method = ftp
-        incoming = ~openlist/ubuntu/ppa/
+        incoming = ~openlist/ubuntu/server/
         login = anonymous
         allow_unsigned_uploads = 0
         EOF

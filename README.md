@@ -101,7 +101,7 @@ Configure these secrets in your GitHub repository settings:
 
 ```bash
 # Download latest release
-wget https://github.com/YOUR_USERNAME/openlist-apt/releases/latest/download/openlist_VERSION-1_amd64.deb
+wget https://github.com/OpenListTeam/OpenList-APT/releases/latest/download/openlist_VERSION-1_amd64.deb
 
 # Install
 sudo dpkg -i openlist_VERSION-1_amd64.deb
