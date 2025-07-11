@@ -947,8 +947,9 @@ jobs:
         # Set debsign to use our wrapper
         export DEBSIGN_PROGRAM="/tmp/gpg_wrapper.sh"
         
-        # Build source package with disabled lintian
-        debuild -S -sa -k$GPG_KEY_ID --no-lintian
+        # Build source package with disabled lintian (using environment variable)
+        export DEB_BUILD_OPTIONS="nocheck"
+        LINTIAN="" debuild -S -sa -k$GPG_KEY_ID
         
         # Go back to parent directory for upload
         cd ..
