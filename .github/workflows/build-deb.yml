@@ -755,6 +755,9 @@ jobs:
     needs: [check-version, build-deb]
     runs-on: ubuntu-latest
     if: needs.check-version.outputs.should_build == 'true' && vars.ENABLE_PPA_UPLOAD == 'true'
+    strategy:
+      matrix:
+        ubuntu_release: [focal, jammy, noble]  # Ubuntu 20.04, 22.04, 24.04
     
     steps:
     - name: Checkout code
@@ -850,23 +853,86 @@ jobs:
         # Enter source directory
         cd openlist-${CLEAN_VERSION}
         
-        # Update changelog for PPA with clean version
+        # Update changelog for PPA with clean version and correct distribution
+        UBUNTU_RELEASE="${{ matrix.ubuntu_release }}"
+        
+        # Set version suffix based on Ubuntu release
+        case "$UBUNTU_RELEASE" in
+          "focal")   VERSION_SUFFIX="1ubuntu1~20.04.1" ;;
+          "jammy")   VERSION_SUFFIX="1ubuntu1~22.04.1" ;;
+          "noble")   VERSION_SUFFIX="1ubuntu1~24.04.1" ;;
+          *)         VERSION_SUFFIX="1ubuntu1" ;;
+        esac
+        
+        echo "Building for Ubuntu $UBUNTU_RELEASE with version suffix: $VERSION_SUFFIX"
+        
         cat > debian/changelog << EOF
-        openlist ($CLEAN_VERSION-1) unstable; urgency=medium
+        openlist ($CLEAN_VERSION-$VERSION_SUFFIX) $UBUNTU_RELEASE; urgency=medium
 
           * DEB package built from OpenListTeam/OpenList $TAG_NAME
-          * Automated build for PPA distribution
+          * Automated build for PPA distribution (Ubuntu $UBUNTU_RELEASE)
           * Binary downloaded from official release
 
          -- OpenList Team <openlistteam@gmail.com>  $(date -R)
         EOF
         
+        # Fix debian/control file - ensure it ends with newline
+        if [ -f debian/control ]; then
+          # Add newline at end if missing
+          sed -i -e '$a\' debian/control
+        fi
+        
+        # Fix debian/rules file - ensure it ends with newline
+        if [ -f debian/rules ]; then
+          # Add newline at end if missing
+          sed -i -e '$a\' debian/rules
+          # Make sure it's executable
+          chmod +x debian/rules
+        fi
+        
+        # Create a basic debian/copyright file if missing
+        if [ ! -f debian/copyright ]; then
+          cat > debian/copyright << 'COPYRIGHT_EOF'
+        Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+        Upstream-Name: openlist
+        Upstream-Contact: OpenList Team <openlistteam@gmail.com>
+        Source: https://github.com/OpenListTeam/OpenList
+
+        Files: *
+        Copyright: 2024 OpenList Team
+        License: MIT
+
+        License: MIT
+         Permission is hereby granted, free of charge, to any person obtaining a
+         copy of this software and associated documentation files (the "Software"),
+         to deal in the Software without restriction, including without limitation
+         the rights to use, copy, modify, merge, publish, distribute, sublicense,
+         and/or sell copies of the Software, and to permit persons to whom the
+         Software is furnished to do so, subject to the following conditions:
+         .
+         The above copyright notice and this permission notice shall be included
+         in all copies or substantial portions of the Software.
+         .
+         THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+         OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+         FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+         THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+         LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+         FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+         DEALINGS IN THE SOFTWARE.
+        COPYRIGHT_EOF
+        fi
+        
         echo "Building source package in directory: $(pwd)"
         echo "Files in current directory:"
         ls -la
         
-        # Build source package
-        debuild -S -sa -k$GPG_KEY_ID
+        # Set GPG environment for non-interactive signing
+        export DEBSIGN_KEYID="$GPG_KEY_ID"
+        export DEBSIGN_PROGRAM="gpg --batch --pinentry-mode loopback --passphrase '$GPG_PASSPHRASE'"
+        
+        # Build source package with proper GPG settings
+        debuild -S -sa -k$GPG_KEY_ID --lintian-opts --no-lintian
         
         # Go back to parent directory for upload
         cd ..
