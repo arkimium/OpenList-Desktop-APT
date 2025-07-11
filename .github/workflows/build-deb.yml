@@ -968,7 +968,18 @@ jobs:
         cd ..
         
         echo "Generated files for PPA upload:"
-        ls -la openlist_${CLEAN_VERSION}-1*
+        ls -la openlist_${CLEAN_VERSION}-*
         
-        # Upload to PPA
-        dput ppa openlist_${CLEAN_VERSION}-1_source.changes
+        # Find the correct changes file with version suffix
+        CHANGES_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}_source.changes"
+        
+        if [ -f "$CHANGES_FILE" ]; then
+          echo "Found changes file: $CHANGES_FILE"
+          # Upload to PPA
+          dput ppa "$CHANGES_FILE"
+        else
+          echo "Error: Changes file not found: $CHANGES_FILE"
+          echo "Available files:"
+          ls -la openlist_${CLEAN_VERSION}-*
+          exit 1
+        fi
