@@ -925,12 +925,26 @@ jobs:
         echo "Files in current directory:"
         ls -la
         
-        # Set GPG environment for non-interactive signing
+        # Configure GPG for non-interactive signing in CI environment
+        export GPG_TTY=""
         export DEBSIGN_KEYID="$GPG_KEY_ID"
-        export DEBSIGN_PROGRAM="gpg --batch --pinentry-mode loopback --passphrase '$GPG_PASSPHRASE'"
         
-        # Build source package with proper GPG settings
-        debuild -S -sa -k$GPG_KEY_ID --lintian-opts --no-lintian
+        # Create GPG preset passphrase to avoid TTY issues
+        echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --quick-generate-key "test" || true
+        
+        # Configure debsign to use batch mode
+        export DEBSIGN_PROGRAM="gpg"
+        
+        # Create a temporary GPG configuration for signing
+        mkdir -p ~/.gnupg
+        cat >> ~/.gnupg/gpg.conf << 'GPG_CONF_EOF'
+        batch
+        no-tty
+        pinentry-mode loopback
+        GPG_CONF_EOF
+        
+        # Build source package with disabled lintian and custom GPG settings
+        echo "$GPG_PASSPHRASE" | debuild -S -sa -k$GPG_KEY_ID --no-lintian --signing-key="$GPG_KEY_ID"
         
         # Go back to parent directory for upload
         cd ..
