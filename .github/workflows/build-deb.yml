@@ -929,12 +929,6 @@ jobs:
         export GPG_TTY=""
         export DEBSIGN_KEYID="$GPG_KEY_ID"
         
-        # Create GPG preset passphrase to avoid TTY issues
-        echo "$GPG_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --quick-generate-key "test" || true
-        
-        # Configure debsign to use batch mode
-        export DEBSIGN_PROGRAM="gpg"
-        
         # Create a temporary GPG configuration for signing
         mkdir -p ~/.gnupg
         cat >> ~/.gnupg/gpg.conf << 'GPG_CONF_EOF'
@@ -943,8 +937,18 @@ jobs:
         pinentry-mode loopback
         GPG_CONF_EOF
         
-        # Build source package with disabled lintian and custom GPG settings
-        echo "$GPG_PASSPHRASE" | debuild -S -sa -k$GPG_KEY_ID --no-lintian --signing-key="$GPG_KEY_ID"
+        # Create a custom debsign wrapper that handles the passphrase
+        cat > /tmp/gpg_wrapper.sh << 'GPG_WRAPPER_EOF'
+        #!/bin/bash
+        echo "$GPG_PASSPHRASE" | gpg --batch --no-tty --pinentry-mode loopback --passphrase-fd 0 "$@"
+        GPG_WRAPPER_EOF
+        chmod +x /tmp/gpg_wrapper.sh
+        
+        # Set debsign to use our wrapper
+        export DEBSIGN_PROGRAM="/tmp/gpg_wrapper.sh"
+        
+        # Build source package with disabled lintian
+        debuild -S -sa -k$GPG_KEY_ID --no-lintian
         
         # Go back to parent directory for upload
         cd ..
