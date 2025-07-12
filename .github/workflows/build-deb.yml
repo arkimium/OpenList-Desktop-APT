@@ -892,15 +892,112 @@ jobs:
         # Update changelog for PPA with clean version and correct distribution
         UBUNTU_RELEASE="${{ matrix.ubuntu_release }}"
         
-        # Set version suffix based on Ubuntu release
-        case "$UBUNTU_RELEASE" in
-          "focal")   VERSION_SUFFIX="1ubuntu1~20.04.1" ;;
-          "jammy")   VERSION_SUFFIX="1ubuntu1~22.04.1" ;;
-          "noble")   VERSION_SUFFIX="1ubuntu1~24.04.1" ;;
-          *)         VERSION_SUFFIX="1ubuntu1" ;;
-        esac
+        # Function to check if version exists in PPA and get next available version
+        get_next_ppa_version() {
+          local base_version="$1"
+          local ubuntu_release="$2"
+          local revision_number=1
+          
+          echo "=== Checking for existing versions in PPA ==="
+          
+          while true; do
+            # Set version suffix based on Ubuntu release and revision number
+            case "$ubuntu_release" in
+              "focal")   test_version_suffix="${revision_number}ubuntu1~20.04.1" ;;
+              "jammy")   test_version_suffix="${revision_number}ubuntu1~22.04.1" ;;
+              "noble")   test_version_suffix="${revision_number}ubuntu1~24.04.1" ;;
+              *)         test_version_suffix="${revision_number}ubuntu1" ;;
+            esac
+            
+            test_full_version="${base_version}-${test_version_suffix}"
+            echo "Checking if version exists: $test_full_version"
+            
+            # Multiple methods to check if version exists in PPA
+            version_exists=false
+            
+            # Method 1: Check Launchpad API for published sources
+            echo "Method 1: Checking Launchpad API..."
+            ppa_api_url="https://api.launchpad.net/1.0/~openlist/+archive/ubuntu/server"
+            api_response=$(curl -s "${ppa_api_url}?ws.op=getPublishedSources&source_name=openlist&distro_series=/ubuntu/${ubuntu_release}" 2>/dev/null || echo "")
+            
+            if echo "$api_response" | grep -q "\"version\": \"$test_full_version\""; then
+              echo "Found version $test_full_version in Launchpad API"
+              version_exists=true
+            fi
+            
+            # Method 2: Check PPA package index (alternative approach)
+            if [ "$version_exists" = false ]; then
+              echo "Method 2: Checking PPA package index..."
+              ppa_packages_url="https://ppa.launchpadcontent.net/openlist/server/ubuntu/dists/${ubuntu_release}/main/source/Sources.gz"
+              
+              # Download and check Sources.gz file
+              if sources_content=$(curl -s "$ppa_packages_url" 2>/dev/null | gunzip 2>/dev/null); then
+                if echo "$sources_content" | grep -A 10 "^Package: openlist$" | grep -q "^Version: $test_full_version$"; then
+                  echo "Found version $test_full_version in PPA Sources"
+                  version_exists=true
+                fi
+              else
+                echo "Could not fetch PPA Sources file (this is normal for new PPAs)"
+              fi
+            fi
+            
+            # Method 3: Try to download the specific .dsc file (most reliable)
+            if [ "$version_exists" = false ]; then
+              echo "Method 3: Checking for .dsc file..."
+              dsc_url="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${test_full_version}.dsc"
+              
+              if curl -s --head "$dsc_url" | grep -q "200 OK"; then
+                echo "Found .dsc file for version $test_full_version"
+                version_exists=true
+              fi
+            fi
+            
+            # Method 4: Fallback - check if we can resolve the package URL structure
+            if [ "$version_exists" = false ]; then
+              echo "Method 4: Checking package URL structure..."
+              # Try common package file patterns
+              for ext in "dsc" "tar.xz" "tar.gz"; do
+                test_url="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${test_full_version}.${ext}"
+                if curl -s --head "$test_url" | grep -q "200 OK"; then
+                  echo "Found package file: openlist_${test_full_version}.${ext}"
+                  version_exists=true
+                  break
+                fi
+              done
+            fi
+            
+            if [ "$version_exists" = true ]; then
+              echo "Version $test_full_version already exists in PPA, trying next revision..."
+              revision_number=$((revision_number + 1))
+              
+              # Safety check to prevent infinite loop
+              if [ $revision_number -gt 50 ]; then
+                echo "Error: Too many revision attempts (>50), something might be wrong"
+                echo "Last checked version: $test_full_version"
+                exit 1
+              fi
+            else
+              echo "Version $test_full_version is available, using this version"
+              echo "$test_version_suffix"
+              return 0
+            fi
+            
+            # Add a small delay to avoid overwhelming the API
+            sleep 1
+          done
+        }
         
-        echo "Building for Ubuntu $UBUNTU_RELEASE with version suffix: $VERSION_SUFFIX"
+        # Get the next available version suffix
+        echo "Getting next available PPA version for $CLEAN_VERSION on $UBUNTU_RELEASE..."
+        VERSION_SUFFIX=$(get_next_ppa_version "$CLEAN_VERSION" "$UBUNTU_RELEASE")
+        
+        if [ -z "$VERSION_SUFFIX" ]; then
+          echo "Error: Failed to determine version suffix"
+          exit 1
+        fi
+        
+        echo "Using version suffix: $VERSION_SUFFIX"
+        echo "Full package version will be: $CLEAN_VERSION-$VERSION_SUFFIX"
         
         cat > debian/changelog << EOF
         openlist ($CLEAN_VERSION-$VERSION_SUFFIX) $UBUNTU_RELEASE; urgency=medium
