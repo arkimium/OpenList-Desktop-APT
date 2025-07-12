@@ -11,6 +11,11 @@ on:
         required: false
         default: 'false'
         type: boolean
+      ppa_build_number:
+        description: 'Custom PPA build number (e.g., 2 for 4.0.8-2ubuntu1~22.04.1)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -903,8 +908,9 @@ jobs:
         # Get the next available version suffix
         echo "Getting next available PPA version for $CLEAN_VERSION on $UBUNTU_RELEASE..."
         
-        # 改进的版本检测逻辑 - 确保每次都重新检测
-        REVISION_NUMBER=1
+        # Check if user provided custom PPA build number
+        CUSTOM_PPA_BUILD="${{ github.event.inputs.ppa_build_number }}"
+        
         case "$UBUNTU_RELEASE" in
           "focal")   BASE_SUFFIX="ubuntu1~20.04.1" ;;
           "jammy")   BASE_SUFFIX="ubuntu1~22.04.1" ;;
@@ -912,60 +918,84 @@ jobs:
           *)         BASE_SUFFIX="ubuntu1" ;;
         esac
         
-        # 连续检测版本，确保找到真正可用的版本
-        while true; do
+        if [ -n "$CUSTOM_PPA_BUILD" ] && [ "$CUSTOM_PPA_BUILD" != "" ]; then
+          # User provided custom build number
+          echo "=== Using custom PPA build number: $CUSTOM_PPA_BUILD ==="
+          REVISION_NUMBER="$CUSTOM_PPA_BUILD"
           VERSION_SUFFIX="${REVISION_NUMBER}${BASE_SUFFIX}"
           TEST_FULL_VERSION="${CLEAN_VERSION}-${VERSION_SUFFIX}"
           
-          echo "=== Checking version $REVISION_NUMBER: $TEST_FULL_VERSION ==="
+          echo "Custom version will be: $TEST_FULL_VERSION"
           
-          # 使用多种方法检测版本是否存在
-          VERSION_EXISTS=false
-          
-          # 方法1: 检查.dsc文件
+          # Check if this custom version already exists (warn but continue)
           DSC_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${TEST_FULL_VERSION}.dsc"
-          echo "Method 1: Checking .dsc file..."
           if curl -s --head "$DSC_URL" | grep -q "200 OK"; then
-            echo "Found .dsc file - version $TEST_FULL_VERSION exists"
-            VERSION_EXISTS=true
+            echo "⚠️  WARNING: Custom version $TEST_FULL_VERSION already exists in PPA!"
+            echo "⚠️  This upload may fail or overwrite the existing package."
+            echo "⚠️  Consider using a different build number."
           else
-            echo "No .dsc file found"
+            echo "✅ Custom version $TEST_FULL_VERSION appears to be available."
           fi
+        else
+          # Auto-detect next available version
+          echo "=== Auto-detecting next available PPA version ==="
+          REVISION_NUMBER=1
           
-          # 方法2: 检查Launchpad API (如果方法1没有发现)
-          if [ "$VERSION_EXISTS" = false ]; then
-            echo "Method 2: Checking Launchpad API..."
-            API_URL="https://api.launchpad.net/1.0/~openlist/+archive/ubuntu/server"
-            API_RESPONSE=$(curl -s "${API_URL}?ws.op=getPublishedSources&source_name=openlist&distro_series=/ubuntu/${UBUNTU_RELEASE}" 2>/dev/null || echo "")
+          # 连续检测版本，确保找到真正可用的版本
+          while true; do
+            VERSION_SUFFIX="${REVISION_NUMBER}${BASE_SUFFIX}"
+            TEST_FULL_VERSION="${CLEAN_VERSION}-${VERSION_SUFFIX}"
             
-            if echo "$API_RESPONSE" | grep -q "\"version\": \"$TEST_FULL_VERSION\""; then
-              echo "Found in Launchpad API - version $TEST_FULL_VERSION exists"
+            echo "=== Checking version $REVISION_NUMBER: $TEST_FULL_VERSION ==="
+            
+            # 使用多种方法检测版本是否存在
+            VERSION_EXISTS=false
+            
+            # 方法1: 检查.dsc文件
+            DSC_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${TEST_FULL_VERSION}.dsc"
+            echo "Method 1: Checking .dsc file..."
+            if curl -s --head "$DSC_URL" | grep -q "200 OK"; then
+              echo "Found .dsc file - version $TEST_FULL_VERSION exists"
               VERSION_EXISTS=true
             else
-              echo "Not found in Launchpad API"
-            fi
-          fi
-          
-          # 判断版本是否可用
-          if [ "$VERSION_EXISTS" = true ]; then
-            echo "Version $TEST_FULL_VERSION is OCCUPIED, trying next revision..."
-            REVISION_NUMBER=$((REVISION_NUMBER + 1))
-            
-            # 安全检查
-            if [ $REVISION_NUMBER -gt 50 ]; then
-              echo "ERROR: Too many revision attempts (>50), something might be wrong"
-              exit 1
+              echo "No .dsc file found"
             fi
             
-            echo "Moving to revision $REVISION_NUMBER..."
-            sleep 1
-            # 继续循环检测下一个版本
-          else
-            echo "Version $TEST_FULL_VERSION is AVAILABLE!"
-            echo "Final decision: Using version $TEST_FULL_VERSION"
-            break
-          fi
-        done
+            # 方法2: 检查Launchpad API (如果方法1没有发现)
+            if [ "$VERSION_EXISTS" = false ]; then
+              echo "Method 2: Checking Launchpad API..."
+              API_URL="https://api.launchpad.net/1.0/~openlist/+archive/ubuntu/server"
+              API_RESPONSE=$(curl -s "${API_URL}?ws.op=getPublishedSources&source_name=openlist&distro_series=/ubuntu/${UBUNTU_RELEASE}" 2>/dev/null || echo "")
+              
+              if echo "$API_RESPONSE" | grep -q "\"version\": \"$TEST_FULL_VERSION\""; then
+                echo "Found in Launchpad API - version $TEST_FULL_VERSION exists"
+                VERSION_EXISTS=true
+              else
+                echo "Not found in Launchpad API"
+              fi
+            fi
+            
+            # 判断版本是否可用
+            if [ "$VERSION_EXISTS" = true ]; then
+              echo "Version $TEST_FULL_VERSION is OCCUPIED, trying next revision..."
+              REVISION_NUMBER=$((REVISION_NUMBER + 1))
+              
+              # 安全检查
+              if [ $REVISION_NUMBER -gt 50 ]; then
+                echo "ERROR: Too many revision attempts (>50), something might be wrong"
+                exit 1
+              fi
+              
+              echo "Moving to revision $REVISION_NUMBER..."
+              sleep 1
+              # 继续循环检测下一个版本
+            else
+              echo "Version $TEST_FULL_VERSION is AVAILABLE!"
+              echo "Final decision: Using version $TEST_FULL_VERSION"
+              break
+            fi
+          done
+        fi
         
         if [ -z "$VERSION_SUFFIX" ]; then
           echo "Error: Failed to determine version suffix"
