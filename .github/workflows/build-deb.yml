@@ -989,7 +989,32 @@ jobs:
         
         # Get the next available version suffix
         echo "Getting next available PPA version for $CLEAN_VERSION on $UBUNTU_RELEASE..."
-        VERSION_SUFFIX=$(get_next_ppa_version "$CLEAN_VERSION" "$UBUNTU_RELEASE")
+        # 简化版本检测逻辑
+        REVISION_NUMBER=1
+        case "$UBUNTU_RELEASE" in
+          "focal")   BASE_SUFFIX="ubuntu1~20.04.1" ;;
+          "jammy")   BASE_SUFFIX="ubuntu1~22.04.1" ;;
+          "noble")   BASE_SUFFIX="ubuntu1~24.04.1" ;;
+          *)         BASE_SUFFIX="ubuntu1" ;;
+        esac
+        while true; do
+          VERSION_SUFFIX="${REVISION_NUMBER}${BASE_SUFFIX}"
+          TEST_FULL_VERSION="${CLEAN_VERSION}-${VERSION_SUFFIX}"
+          echo "Checking if version exists: $TEST_FULL_VERSION"
+          DSC_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${TEST_FULL_VERSION}.dsc"
+          if curl -s --head "$DSC_URL" | grep -q "200 OK"; then
+            echo "Version $TEST_FULL_VERSION already exists, trying next revision..."
+            REVISION_NUMBER=$((REVISION_NUMBER + 1))
+            if [ $REVISION_NUMBER -gt 50 ]; then
+              echo "Error: Too many revision attempts"
+              exit 1
+            fi
+          else
+            echo "Version $TEST_FULL_VERSION is available"
+            break
+          fi
+          sleep 1
+        done
         
         if [ -z "$VERSION_SUFFIX" ]; then
           echo "Error: Failed to determine version suffix"
