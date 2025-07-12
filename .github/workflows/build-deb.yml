@@ -914,6 +914,7 @@ jobs:
         # Copy debian directory to source directory
         echo "Copying debian packaging files..."
         cp -r debian openlist-${CLEAN_VERSION}/
+        ls -la openlist-${CLEAN_VERSION}/debian/binaries/
         
         # Enter source directory
         cd openlist-${CLEAN_VERSION}
