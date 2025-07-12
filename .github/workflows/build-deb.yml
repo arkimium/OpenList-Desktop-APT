@@ -914,7 +914,20 @@ jobs:
         # Copy debian directory to source directory
         echo "Copying debian packaging files..."
         cp -r debian openlist-${CLEAN_VERSION}/
-        ls -la openlist-${CLEAN_VERSION}/debian/binaries/
+        
+        # Verify that pre-downloaded binaries are in the source package
+        echo "Verifying pre-downloaded binaries in source package..."
+        if [ -d "openlist-${CLEAN_VERSION}/debian/binaries" ]; then
+          echo "✅ Binaries found in source package:"
+          ls -la openlist-${CLEAN_VERSION}/debian/binaries/
+        else
+          echo "❌ No binaries found in source package - this should not happen"
+          echo "Contents of source directory:"
+          ls -la openlist-${CLEAN_VERSION}/
+          echo "Contents of debian directory:"
+          ls -la openlist-${CLEAN_VERSION}/debian/
+          exit 1
+        fi
         
         # Enter source directory
         cd openlist-${CLEAN_VERSION}

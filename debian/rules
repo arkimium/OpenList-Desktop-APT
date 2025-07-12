@@ -105,9 +105,18 @@ override_dh_shlibdeps:
 	@echo "Skipping dh_shlibdeps - Go binaries are statically linked"
 
 override_dh_auto_clean:
+	@echo "=== Debian Rules: override_dh_auto_clean ==="
 	rm -f openlist-linux-*.tar.gz
 	rm -rf temp_extract
-	rm -rf debian/binaries
+	# Preserve debian/binaries directory during build process
+	# It contains pre-downloaded binaries for PPA builds
+	@if [ -d "debian/binaries" ]; then \
+		echo "Preserving debian/binaries (contains pre-downloaded binaries for PPA)"; \
+		echo "Contents of debian/binaries:"; \
+		ls -la debian/binaries/ || true; \
+	else \
+		echo "No debian/binaries directory found"; \
+	fi
 	dh_auto_clean
 
 override_dh_auto_test:
