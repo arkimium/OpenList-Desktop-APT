@@ -900,104 +900,10 @@ jobs:
         # Update changelog for PPA with clean version and correct distribution
         UBUNTU_RELEASE="${{ matrix.ubuntu_release }}"
         
-        # Function to check if version exists in PPA and get next available version
-        get_next_ppa_version() {
-          local base_version="$1"
-          local ubuntu_release="$2"
-          local revision_number=1
-          
-          echo "=== Checking for existing versions in PPA ==="
-          
-          while true; do
-            # Set version suffix based on Ubuntu release and revision number
-            case "$ubuntu_release" in
-              "focal")   test_version_suffix="${revision_number}ubuntu1~20.04.1" ;;
-              "jammy")   test_version_suffix="${revision_number}ubuntu1~22.04.1" ;;
-              "noble")   test_version_suffix="${revision_number}ubuntu1~24.04.1" ;;
-              *)         test_version_suffix="${revision_number}ubuntu1" ;;
-            esac
-            
-            test_full_version="${base_version}-${test_version_suffix}"
-            echo "Checking if version exists: $test_full_version"
-            
-            # Multiple methods to check if version exists in PPA
-            version_exists=false
-            
-            # Method 1: Check Launchpad API for published sources
-            echo "Method 1: Checking Launchpad API..."
-            ppa_api_url="https://api.launchpad.net/1.0/~openlist/+archive/ubuntu/server"
-            api_response=$(curl -s "${ppa_api_url}?ws.op=getPublishedSources&source_name=openlist&distro_series=/ubuntu/${ubuntu_release}" 2>/dev/null || echo "")
-            
-            if echo "$api_response" | grep -q "\"version\": \"$test_full_version\""; then
-              echo "Found version $test_full_version in Launchpad API"
-              version_exists=true
-            fi
-            
-            # Method 2: Check PPA package index (alternative approach)
-            if [ "$version_exists" = false ]; then
-              echo "Method 2: Checking PPA package index..."
-              ppa_packages_url="https://ppa.launchpadcontent.net/openlist/server/ubuntu/dists/${ubuntu_release}/main/source/Sources.gz"
-              
-              # Download and check Sources.gz file
-              if sources_content=$(curl -s "$ppa_packages_url" 2>/dev/null | gunzip 2>/dev/null); then
-                if echo "$sources_content" | grep -A 10 "^Package: openlist$" | grep -q "^Version: $test_full_version$"; then
-                  echo "Found version $test_full_version in PPA Sources"
-                  version_exists=true
-                fi
-              else
-                echo "Could not fetch PPA Sources file (this is normal for new PPAs)"
-              fi
-            fi
-            
-            # Method 3: Try to download the specific .dsc file (most reliable)
-            if [ "$version_exists" = false ]; then
-              echo "Method 3: Checking for .dsc file..."
-              dsc_url="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${test_full_version}.dsc"
-              
-              if curl -s --head "$dsc_url" | grep -q "200 OK"; then
-                echo "Found .dsc file for version $test_full_version"
-                version_exists=true
-              fi
-            fi
-            
-            # Method 4: Fallback - check if we can resolve the package URL structure
-            if [ "$version_exists" = false ]; then
-              echo "Method 4: Checking package URL structure..."
-              # Try common package file patterns
-              for ext in "dsc" "tar.xz" "tar.gz"; do
-                test_url="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${test_full_version}.${ext}"
-                if curl -s --head "$test_url" | grep -q "200 OK"; then
-                  echo "Found package file: openlist_${test_full_version}.${ext}"
-                  version_exists=true
-                  break
-                fi
-              done
-            fi
-            
-            if [ "$version_exists" = true ]; then
-              echo "Version $test_full_version already exists in PPA, trying next revision..."
-              revision_number=$((revision_number + 1))
-              
-              # Safety check to prevent infinite loop
-              if [ $revision_number -gt 50 ]; then
-                echo "Error: Too many revision attempts (>50), something might be wrong"
-                echo "Last checked version: $test_full_version"
-                exit 1
-              fi
-            else
-              echo "Version $test_full_version is available, using this version"
-              echo "$test_version_suffix"
-              return 0
-            fi
-            
-            # Add a small delay to avoid overwhelming the API
-            sleep 1
-          done
-        }
-        
         # Get the next available version suffix
         echo "Getting next available PPA version for $CLEAN_VERSION on $UBUNTU_RELEASE..."
-        # 简化版本检测逻辑
+        
+        # 改进的版本检测逻辑 - 确保每次都重新检测
         REVISION_NUMBER=1
         case "$UBUNTU_RELEASE" in
           "focal")   BASE_SUFFIX="ubuntu1~20.04.1" ;;
@@ -1005,9 +911,12 @@ jobs:
           "noble")   BASE_SUFFIX="ubuntu1~24.04.1" ;;
           *)         BASE_SUFFIX="ubuntu1" ;;
         esac
+        
+        # 连续检测版本，确保找到真正可用的版本
         while true; do
           VERSION_SUFFIX="${REVISION_NUMBER}${BASE_SUFFIX}"
           TEST_FULL_VERSION="${CLEAN_VERSION}-${VERSION_SUFFIX}"
+          
           echo "=== Checking version $REVISION_NUMBER: $TEST_FULL_VERSION ==="
           
           # 使用多种方法检测版本是否存在
@@ -1017,10 +926,10 @@ jobs:
           DSC_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${TEST_FULL_VERSION}.dsc"
           echo "Method 1: Checking .dsc file..."
           if curl -s --head "$DSC_URL" | grep -q "200 OK"; then
-            echo "✗ Found .dsc file - version $TEST_FULL_VERSION exists"
+            echo "Found .dsc file - version $TEST_FULL_VERSION exists"
             VERSION_EXISTS=true
           else
-            echo "✓ No .dsc file found"
+            echo "No .dsc file found"
           fi
           
           # 方法2: 检查Launchpad API (如果方法1没有发现)
@@ -1029,52 +938,33 @@ jobs:
             API_URL="https://api.launchpad.net/1.0/~openlist/+archive/ubuntu/server"
             API_RESPONSE=$(curl -s "${API_URL}?ws.op=getPublishedSources&source_name=openlist&distro_series=/ubuntu/${UBUNTU_RELEASE}" 2>/dev/null || echo "")
             
-            if echo "$API_RESPONSE" | grep -q ""version": "$TEST_FULL_VERSION""; then
-              echo "✗ Found in Launchpad API - version $TEST_FULL_VERSION exists"
+            if echo "$API_RESPONSE" | grep -q "\"version\": \"$TEST_FULL_VERSION\""; then
+              echo "Found in Launchpad API - version $TEST_FULL_VERSION exists"
               VERSION_EXISTS=true
             else
-              echo "✓ Not found in Launchpad API"
-            fi
-          fi
-          
-          # 方法3: 检查PPA Sources文件 (如果前两种方法都没有发现)
-          if [ "$VERSION_EXISTS" = false ]; then
-            echo "Method 3: Checking PPA Sources.gz..."
-            SOURCES_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/dists/${UBUNTU_RELEASE}/main/source/Sources.gz"
-            
-            if SOURCES_CONTENT=$(curl -s "$SOURCES_URL" 2>/dev/null | gunzip 2>/dev/null); then
-              if echo "$SOURCES_CONTENT" | grep -A 10 "^Package: openlist$" | grep -q "^Version: $TEST_FULL_VERSION$"; then
-                echo "✗ Found in Sources.gz - version $TEST_FULL_VERSION exists"
-                VERSION_EXISTS=true
-              else
-                echo "✓ Not found in Sources.gz"
-              fi
-            else
-              echo "✓ Could not fetch Sources.gz (normal for new PPAs)"
+              echo "Not found in Launchpad API"
             fi
           fi
           
           # 判断版本是否可用
           if [ "$VERSION_EXISTS" = true ]; then
-            echo "❌ Version $TEST_FULL_VERSION is OCCUPIED, trying next revision..."
+            echo "Version $TEST_FULL_VERSION is OCCUPIED, trying next revision..."
             REVISION_NUMBER=$((REVISION_NUMBER + 1))
             
             # 安全检查
             if [ $REVISION_NUMBER -gt 50 ]; then
-              echo "❌ ERROR: Too many revision attempts (>50), something might be wrong"
+              echo "ERROR: Too many revision attempts (>50), something might be wrong"
               exit 1
             fi
             
-            echo "⏭️  Moving to revision $REVISION_NUMBER..."
+            echo "Moving to revision $REVISION_NUMBER..."
+            sleep 1
             # 继续循环检测下一个版本
           else
-            echo "✅ Version $TEST_FULL_VERSION is AVAILABLE!"
-            echo "   Final decision: Using version $TEST_FULL_VERSION"
+            echo "Version $TEST_FULL_VERSION is AVAILABLE!"
+            echo "Final decision: Using version $TEST_FULL_VERSION"
             break
           fi
-            break
-          fi
-          sleep 1
         done
         
         if [ -z "$VERSION_SUFFIX" ]; then
