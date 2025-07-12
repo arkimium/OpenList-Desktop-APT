@@ -1008,17 +1008,70 @@ jobs:
         while true; do
           VERSION_SUFFIX="${REVISION_NUMBER}${BASE_SUFFIX}"
           TEST_FULL_VERSION="${CLEAN_VERSION}-${VERSION_SUFFIX}"
-          echo "Checking if version exists: $TEST_FULL_VERSION"
+          echo "=== Checking version $REVISION_NUMBER: $TEST_FULL_VERSION ==="
+          
+          # 使用多种方法检测版本是否存在
+          VERSION_EXISTS=false
+          
+          # 方法1: 检查.dsc文件
           DSC_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${TEST_FULL_VERSION}.dsc"
+          echo "Method 1: Checking .dsc file..."
           if curl -s --head "$DSC_URL" | grep -q "200 OK"; then
-            echo "Version $TEST_FULL_VERSION already exists, trying next revision..."
+            echo "✗ Found .dsc file - version $TEST_FULL_VERSION exists"
+            VERSION_EXISTS=true
+          else
+            echo "✓ No .dsc file found"
+          fi
+          
+          # 方法2: 检查Launchpad API (如果方法1没有发现)
+          if [ "$VERSION_EXISTS" = false ]; then
+            echo "Method 2: Checking Launchpad API..."
+            API_URL="https://api.launchpad.net/1.0/~openlist/+archive/ubuntu/server"
+            API_RESPONSE=$(curl -s "${API_URL}?ws.op=getPublishedSources&source_name=openlist&distro_series=/ubuntu/${UBUNTU_RELEASE}" 2>/dev/null || echo "")
+            
+            if echo "$API_RESPONSE" | grep -q ""version": "$TEST_FULL_VERSION""; then
+              echo "✗ Found in Launchpad API - version $TEST_FULL_VERSION exists"
+              VERSION_EXISTS=true
+            else
+              echo "✓ Not found in Launchpad API"
+            fi
+          fi
+          
+          # 方法3: 检查PPA Sources文件 (如果前两种方法都没有发现)
+          if [ "$VERSION_EXISTS" = false ]; then
+            echo "Method 3: Checking PPA Sources.gz..."
+            SOURCES_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/dists/${UBUNTU_RELEASE}/main/source/Sources.gz"
+            
+            if SOURCES_CONTENT=$(curl -s "$SOURCES_URL" 2>/dev/null | gunzip 2>/dev/null); then
+              if echo "$SOURCES_CONTENT" | grep -A 10 "^Package: openlist$" | grep -q "^Version: $TEST_FULL_VERSION$"; then
+                echo "✗ Found in Sources.gz - version $TEST_FULL_VERSION exists"
+                VERSION_EXISTS=true
+              else
+                echo "✓ Not found in Sources.gz"
+              fi
+            else
+              echo "✓ Could not fetch Sources.gz (normal for new PPAs)"
+            fi
+          fi
+          
+          # 判断版本是否可用
+          if [ "$VERSION_EXISTS" = true ]; then
+            echo "❌ Version $TEST_FULL_VERSION is OCCUPIED, trying next revision..."
             REVISION_NUMBER=$((REVISION_NUMBER + 1))
+            
+            # 安全检查
             if [ $REVISION_NUMBER -gt 50 ]; then
-              echo "Error: Too many revision attempts"
+              echo "❌ ERROR: Too many revision attempts (>50), something might be wrong"
               exit 1
             fi
+            
+            echo "⏭️  Moving to revision $REVISION_NUMBER..."
+            # 继续循环检测下一个版本
           else
-            echo "Version $TEST_FULL_VERSION is available"
+            echo "✅ Version $TEST_FULL_VERSION is AVAILABLE!"
+            echo "   Final decision: Using version $TEST_FULL_VERSION"
+            break
+          fi
             break
           fi
           sleep 1
