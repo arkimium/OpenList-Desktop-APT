@@ -835,28 +835,44 @@ jobs:
         cd openlist-${CLEAN_VERSION}
         
         # Download binaries for both architectures that PPA will need
+        # Use quiet mode to reduce log output and prevent buffer overflow
+        echo "=== Downloading OpenList binaries ==="
+        
         for ARCH in amd64 arm64; do
           BINARY_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
-          echo "Downloading binary for $ARCH from: $BINARY_URL"
+          echo "Downloading binary for $ARCH..."
+          echo "URL: $BINARY_URL"
           
-          if wget -O "openlist-linux-$ARCH.tar.gz" "$BINARY_URL"; then
-            echo "Successfully downloaded openlist-linux-$ARCH.tar.gz"
-            echo "File size: $(ls -lh openlist-linux-$ARCH.tar.gz | awk '{print $5}')"
+          # Use wget with progress bar instead of verbose output to reduce log spam
+          if wget --progress=bar:force:noscroll -O "openlist-linux-$ARCH.tar.gz" "$BINARY_URL" 2>&1; then
+            echo "✅ Successfully downloaded openlist-linux-$ARCH.tar.gz"
+            FILE_SIZE=$(ls -lh openlist-linux-$ARCH.tar.gz | awk '{print $5}')
+            echo "📦 File size: $FILE_SIZE"
+            
+            # Verify the file is not empty
+            if [ ! -s "openlist-linux-$ARCH.tar.gz" ]; then
+              echo "❌ Error: Downloaded file is empty"
+              exit 1
+            fi
           else
-            echo "Error: Failed to download openlist-linux-$ARCH.tar.gz"
+            echo "❌ Error: Failed to download openlist-linux-$ARCH.tar.gz"
             exit 1
           fi
+          
+          echo "---"
         done
         
+        echo "=== Download Summary ==="
         echo "Downloaded binaries:"
         ls -la openlist-linux-*.tar.gz
         
         # Create a binaries directory and move the downloaded files there
         # This ensures they are included in the source package
+        echo "=== Organizing binaries ==="
         mkdir -p debian/binaries
         mv openlist-linux-*.tar.gz debian/binaries/
         
-        echo "Moved binaries to debian/binaries/:"
+        echo "✅ Moved binaries to debian/binaries/:"
         ls -la debian/binaries/
         
         # Go back to parent directory
