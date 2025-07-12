@@ -846,6 +846,14 @@ jobs:
         echo "Downloaded binaries:"
         ls -la openlist-linux-*.tar.gz
         
+        # Create a binaries directory and move the downloaded files there
+        # This ensures they are included in the source package
+        mkdir -p debian/binaries
+        mv openlist-linux-*.tar.gz debian/binaries/
+        
+        echo "Moved binaries to debian/binaries/:"
+        ls -la debian/binaries/
+        
         # Go back to parent directory
         cd ..
         

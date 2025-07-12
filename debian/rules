@@ -20,8 +20,12 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	@echo "=== Debian Rules: override_dh_auto_install ==="
-	@echo "Downloading binary for architecture: $(DEB_HOST_ARCH)"
-	if [ ! -f "openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
+	@echo "Looking for binary for architecture: $(DEB_HOST_ARCH)"
+	# First check if binary is pre-downloaded in debian/binaries/ (for PPA builds)
+	if [ -f "debian/binaries/openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
+		echo "Found pre-downloaded binary in debian/binaries/"; \
+		cp "debian/binaries/openlist-linux-$(DEB_HOST_ARCH).tar.gz" "openlist-linux-$(DEB_HOST_ARCH).tar.gz"; \
+	elif [ ! -f "openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
 		echo "Binary archive not found, downloading..."; \
 		echo "Download URL: https://github.com/OpenListTeam/OpenList/releases/download/$(SOURCE_TAG)/openlist-linux-$(DEB_HOST_ARCH).tar.gz"; \
 		wget -O "openlist-linux-$(DEB_HOST_ARCH).tar.gz" \
@@ -103,6 +107,7 @@ override_dh_shlibdeps:
 override_dh_auto_clean:
 	rm -f openlist-linux-*.tar.gz
 	rm -rf temp_extract
+	rm -rf debian/binaries
 	dh_auto_clean
 
 override_dh_auto_test:
