@@ -887,8 +887,7 @@ jobs:
         GPG_AGENT_CONF_EOF
         
         # Restart GPG agent
-        gpgconf --kill gpg-agent
-        gpg-agent --daemon
+        gpgconf --reload gpg-agent
         
         # Test GPG configuration
         echo "Testing GPG configuration..."
