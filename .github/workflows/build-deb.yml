@@ -773,7 +773,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y debhelper devscripts build-essential dput jq
         
-    - name: Download OpenList source for PPA
+    - name: Prepare minimal source package for PPA
       run: |
         VERSION="${{ needs.check-version.outputs.version }}"
         TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
@@ -781,62 +781,46 @@ jobs:
         # Ensure version is clean (no 'v' prefix)
         CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
         
-        echo "=== Preparing source package for PPA ==="
+        echo "=== Preparing minimal source package for PPA ==="
         echo "VERSION: $VERSION"
         echo "TAG_NAME: $TAG_NAME"
         echo "CLEAN_VERSION: $CLEAN_VERSION"
         
-        # Download source code with correct naming for PPA
-        echo "Downloading source from: https://github.com/OpenListTeam/OpenList/archive/$TAG_NAME.tar.gz"
-        wget -O "openlist_${CLEAN_VERSION}.orig.tar.gz" \
-          "https://github.com/OpenListTeam/OpenList/archive/$TAG_NAME.tar.gz"
+        # Create minimal source directory structure (no need to download full OpenList source)
+        mkdir -p "openlist-${CLEAN_VERSION}"
+        cd "openlist-${CLEAN_VERSION}"
         
-        # Verify the downloaded file
-        if [ ! -f "openlist_${CLEAN_VERSION}.orig.tar.gz" ]; then
-          echo "Error: Failed to download source archive"
-          exit 1
-        fi
+        # Create minimal source files required for PPA
+        echo "Creating minimal source structure..."
         
-        echo "Downloaded source archive:"
-        ls -la openlist_${CLEAN_VERSION}.orig.tar.gz
+        # Create a minimal README
+        cat > README.md << 'EOF'
+        # OpenList DEB Package
         
-        # Extract and prepare source directory
-        tar -xzf "openlist_${CLEAN_VERSION}.orig.tar.gz"
+        This is a minimal source package for building OpenList DEB packages.
+        The actual OpenList binaries are downloaded from the official releases.
+        EOF
         
-        # The extracted directory will be named OpenList-$TAG_NAME (without 'v' prefix)
-        EXTRACTED_DIR="OpenList-${TAG_NAME#v}"
-        if [ ! -d "$EXTRACTED_DIR" ]; then
-          echo "Error: Expected directory $EXTRACTED_DIR not found"
-          echo "Available directories:"
-          ls -la
-          exit 1
-        fi
+        # Create a minimal Makefile (required for debian source packages)
+        cat > Makefile << 'EOF'
+        # Minimal Makefile for OpenList DEB package
+        # The actual build is handled by debian/rules
         
-        # Rename to match debian package naming convention
-        mv "$EXTRACTED_DIR" "openlist-${CLEAN_VERSION}"
+        all:
+        	@echo "OpenList DEB package - build handled by debian/rules"
         
-        echo "Prepared source directory:"
-        ls -la openlist-${CLEAN_VERSION}/
+        install:
+        	@echo "Install handled by debian/rules"
         
-    - name: Download OpenList binaries for PPA
-      run: |
-        VERSION="${{ needs.check-version.outputs.version }}"
-        TAG_NAME="${{ needs.check-version.outputs.tag_name }}"
+        clean:
+        	@echo "Clean handled by debian/rules"
         
-        # Ensure version is clean (no 'v' prefix)
-        CLEAN_VERSION=$(echo "$VERSION" | sed 's/^v//')
-        
-        echo "=== Downloading OpenList binaries for PPA build ==="
-        echo "VERSION: $VERSION"
-        echo "TAG_NAME: $TAG_NAME"
-        echo "CLEAN_VERSION: $CLEAN_VERSION"
-        
-        # Enter source directory
-        cd openlist-${CLEAN_VERSION}
+        .PHONY: all install clean
+        EOF
         
         # Download binaries for both architectures that PPA will need
-        # Use quiet mode to reduce log output and prevent buffer overflow
         echo "=== Downloading OpenList binaries ==="
+        mkdir -p debian/binaries
         
         for ARCH in amd64 arm64; do
           BINARY_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
@@ -844,13 +828,13 @@ jobs:
           echo "URL: $BINARY_URL"
           
           # Use wget with progress bar instead of verbose output to reduce log spam
-          if wget --progress=bar:force:noscroll -O "openlist-linux-$ARCH.tar.gz" "$BINARY_URL" 2>&1; then
+          if wget --progress=bar:force:noscroll -O "debian/binaries/openlist-linux-$ARCH.tar.gz" "$BINARY_URL" 2>&1; then
             echo "✅ Successfully downloaded openlist-linux-$ARCH.tar.gz"
-            FILE_SIZE=$(ls -lh openlist-linux-$ARCH.tar.gz | awk '{print $5}')
+            FILE_SIZE=$(ls -lh debian/binaries/openlist-linux-$ARCH.tar.gz | awk '{print $5}')
             echo "📦 File size: $FILE_SIZE"
             
             # Verify the file is not empty
-            if [ ! -s "openlist-linux-$ARCH.tar.gz" ]; then
+            if [ ! -s "debian/binaries/openlist-linux-$ARCH.tar.gz" ]; then
               echo "❌ Error: Downloaded file is empty"
               exit 1
             fi
@@ -864,30 +848,58 @@ jobs:
         
         echo "=== Download Summary ==="
         echo "Downloaded binaries:"
-        ls -la openlist-linux-*.tar.gz
-        
-        # Create a binaries directory and move the downloaded files there
-        # This ensures they are included in the source package
-        echo "=== Organizing binaries ==="
-        mkdir -p debian/binaries
-        mv openlist-linux-*.tar.gz debian/binaries/
-        
-        echo "✅ Moved binaries to debian/binaries/:"
         ls -la debian/binaries/
         
         # Go back to parent directory
         cd ..
+        
+        # Create the orig.tar.gz from our minimal source (required for PPA)
+        echo "Creating orig.tar.gz from minimal source..."
+        tar -czf "openlist_${CLEAN_VERSION}.orig.tar.gz" "openlist-${CLEAN_VERSION}"
+        
+        echo "Created minimal source package:"
+        ls -la openlist_${CLEAN_VERSION}.orig.tar.gz
         
     - name: Set up GPG
       env:
         GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       run: |
+        # Create GPG directory with proper permissions
+        mkdir -p ~/.gnupg
+        chmod 700 ~/.gnupg
+        
+        # Import GPG private key
         echo "$GPG_PRIVATE_KEY" | gpg --batch --import
-        echo "use-agent" >> ~/.gnupg/gpg.conf
-        echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
-        echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
-        echo RELOADAGENT | gpg-connect-agent
+        
+        # Configure GPG for non-interactive use in CI
+        cat > ~/.gnupg/gpg.conf << 'GPG_CONF_EOF'
+        use-agent
+        pinentry-mode loopback
+        batch
+        no-tty
+        GPG_CONF_EOF
+        
+        cat > ~/.gnupg/gpg-agent.conf << 'GPG_AGENT_CONF_EOF'
+        allow-loopback-pinentry
+        default-cache-ttl 7200
+        max-cache-ttl 7200
+        GPG_AGENT_CONF_EOF
+        
+        # Restart GPG agent
+        gpgconf --kill gpg-agent
+        gpg-agent --daemon
+        
+        # Test GPG configuration
+        echo "Testing GPG configuration..."
+        echo "test" | gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --clearsign > /dev/null 2>&1
+        
+        if [ $? -eq 0 ]; then
+          echo "✅ GPG configuration test successful"
+        else
+          echo "❌ GPG configuration test failed"
+          exit 1
+        fi
         
     - name: Build and upload source package to PPA
       env:
@@ -1131,24 +1143,128 @@ jobs:
         
         # Build source package with disabled lintian (using environment variable)
         export DEB_BUILD_OPTIONS="nocheck"
-        LINTIAN="" debuild -S -sa -k$GPG_KEY_ID
         
-        # Go back to parent directory for upload
-        cd ..
+        echo "=== Building source package with debuild ==="
+        echo "GPG_KEY_ID: $GPG_KEY_ID"
+        echo "DEBSIGN_KEYID: $DEBSIGN_KEYID"
+        echo "DEBSIGN_PROGRAM: $DEBSIGN_PROGRAM"
         
+        # Use debuild with explicit GPG configuration
+        if ! LINTIAN="" debuild -S -sa -k$GPG_KEY_ID; then
+          echo "❌ debuild failed, checking for common issues..."
+          
+          # Check if GPG key is available
+          if ! gpg --list-secret-keys "$GPG_KEY_ID" >/dev/null 2>&1; then
+            echo "❌ GPG key $GPG_KEY_ID not found in keyring"
+            echo "Available keys:"
+            gpg --list-secret-keys
+            exit 1
+          fi
+          
+          # Try alternative signing approach
+          echo "🔄 Trying alternative signing approach..."
+          
+          # Build unsigned first
+          if dpkg-buildpackage -S -sa -us -uc; then
+            echo "✅ Unsigned source package built successfully"
+            
+            # Sign manually
+            echo "🔐 Signing source package manually..."
+            cd ..
+            
+            DSC_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}.dsc"
+            CHANGES_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}_source.changes"
+            
+            if [ -f "$DSC_FILE" ] && [ -f "$CHANGES_FILE" ]; then
+              # Sign .dsc file
+              if gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+                     --armor --detach-sign --sign "$DSC_FILE"; then
+                echo "✅ .dsc file signed successfully"
+              else
+                echo "❌ Failed to sign .dsc file"
+                exit 1
+              fi
+              
+              # Sign .changes file
+              if gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+                     --armor --detach-sign --sign "$CHANGES_FILE"; then
+                echo "✅ .changes file signed successfully"
+              else
+                echo "❌ Failed to sign .changes file"
+                exit 1
+              fi
+            else
+              echo "❌ Required files not found: $DSC_FILE, $CHANGES_FILE"
+              exit 1
+            fi
+            
+            cd openlist-${CLEAN_VERSION}
+          else
+            echo "❌ Even unsigned build failed"
+            exit 1
+          fi
+        else
+          echo "✅ debuild completed successfully"
+          cd ..
+        fi
+        
+        echo "=== Verifying generated files ==="
         echo "Generated files for PPA upload:"
         ls -la openlist_${CLEAN_VERSION}-*
         
         # Find the correct changes file with version suffix
         CHANGES_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}_source.changes"
+        DSC_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}.dsc"
         
-        if [ -f "$CHANGES_FILE" ]; then
-          echo "Found changes file: $CHANGES_FILE"
-          # Upload to PPA
-          dput ppa "$CHANGES_FILE"
-        else
-          echo "Error: Changes file not found: $CHANGES_FILE"
+        # Verify files exist
+        if [ ! -f "$CHANGES_FILE" ]; then
+          echo "❌ Changes file not found: $CHANGES_FILE"
           echo "Available files:"
           ls -la openlist_${CLEAN_VERSION}-*
+          exit 1
+        fi
+        
+        if [ ! -f "$DSC_FILE" ]; then
+          echo "❌ DSC file not found: $DSC_FILE"
+          echo "Available files:"
+          ls -la openlist_${CLEAN_VERSION}-*
+          exit 1
+        fi
+        
+        # Verify GPG signatures
+        echo "=== Verifying GPG signatures ==="
+        
+        echo "Verifying $CHANGES_FILE signature..."
+        if gpg --verify "$CHANGES_FILE" 2>&1; then
+          echo "✅ $CHANGES_FILE signature verified"
+        else
+          echo "❌ $CHANGES_FILE signature verification failed"
+          echo "File contents:"
+          head -20 "$CHANGES_FILE"
+          exit 1
+        fi
+        
+        echo "Verifying $DSC_FILE signature..."
+        if gpg --verify "$DSC_FILE" 2>&1; then
+          echo "✅ $DSC_FILE signature verified"
+        else
+          echo "❌ $DSC_FILE signature verification failed"
+          echo "File contents:"
+          head -20 "$DSC_FILE"
+          exit 1
+        fi
+        
+        echo "=== Uploading to PPA ==="
+        echo "Found changes file: $CHANGES_FILE"
+        
+        # Upload to PPA with verbose output
+        if dput -f ppa "$CHANGES_FILE"; then
+          echo "✅ Successfully uploaded to PPA"
+        else
+          echo "❌ PPA upload failed"
+          echo "Checking dput configuration..."
+          cat ~/.dput.cf
+          echo "Checking changes file content..."
+          cat "$CHANGES_FILE"
           exit 1
         fi
