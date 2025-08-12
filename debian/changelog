@@ -1,5 +1,10 @@
-openlist (1.0.0-1) unstable; urgency=medium
+openlist desktop (6.0.1) ; urgency=medium
 
-  * Initial release
+chore: bump version to 0.6.1 (15d789e)
+feat: add GitHub Actions workflow for cross-platform build testing (d6ff164)
+refactor: remove unnecessary logging in Rclone status check (7f7cc8c)
+feat: optimize rclone backend status check method (9277c93)
+fix: fix reset admin passwd error on windows close #69 (a6c83fe)
+feat: update macOS link opening behavior to allow opening in browser #71 (c47fc14)
 
- -- OpenList Team <openlistteam@gmail.com>  Mon, 01 Jan 2024 00:00:00 +0000
+ -- OpenList Team <openlistteam@gmail.com>  Wed, 23 Jul 2025 00:00:00 +0000
