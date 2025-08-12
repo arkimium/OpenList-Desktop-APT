@@ -39,7 +39,7 @@ jobs:
         echo "=== Fetching latest release from OpenListTeam/OpenList ==="
         
         # Get latest release info from OpenList repository
-        RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList/releases/latest")
+        RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList-Desktop/releases/latest")
         
         echo "API Response:"
         echo "$RELEASE_INFO" | jq '.' || echo "Failed to parse JSON response"
@@ -52,13 +52,13 @@ jobs:
           echo "Trying alternative approach..."
           
           # Try to get the first release if latest fails
-          RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList/releases" | jq '.[0]')
+          RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList-Desktop/releases" | jq '.[0]')
           TAG_NAME=$(echo "$RELEASE_INFO" | jq -r '.tag_name // empty')
           
           if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "null" ] || [ "$TAG_NAME" = "empty" ]; then
             echo "Error: Still failed to get tag_name"
             echo "Using fallback version"
-            TAG_NAME="v1.0.0"
+            TAG_NAME="v0.6.1"
           fi
         fi
         
@@ -72,13 +72,13 @@ jobs:
         if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
           echo "Warning: Version format seems invalid: $VERSION"
           echo "Using fallback version"
-          VERSION="1.0.0"
-          TAG_NAME="v1.0.0"
+          VERSION="0.6.1"
+          TAG_NAME="v0.6.1"
         fi
         
         echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Latest OpenList version: $VERSION (tag: $TAG_NAME)"
+        echo "Latest OpenList Desktop version: $VERSION (tag: $TAG_NAME)"
         
     - name: Check if build is needed
       id: check-build
@@ -106,7 +106,7 @@ jobs:
         fi
 
   build-deb:
-    name: Build OpenList Packages
+    name: Build OpenList Desktop Packages
     needs: check-version
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
@@ -164,13 +164,13 @@ jobs:
         
         # Update changelog with clean version (no 'v' prefix)
         cat > debian/changelog << EOF
-        openlist ($CLEAN_VERSION-1) unstable; urgency=medium
+        openlist-desktop ($CLEAN_VERSION-1); urgency=medium
 
-          * DEB package built from OpenListTeam/OpenList $TAG_NAME
+          * DEB package built from OpenListTeam/OpenList-Desktop $TAG_NAME
           * Automated build for $ARCH architecture
           * Binary downloaded from official release
 
-         -- OpenList Team <openlistteam@gmail.com>  $(date -R)
+         -- Lycaon Constantine Cayde <kamialef2345@gmail.com>, original distributed by OpenList Team <openlistteam@gmail.com>  $(date -R)
         EOF
         
         echo "Generated changelog:"
@@ -185,12 +185,12 @@ jobs:
         echo "=== Pre-downloading binary (optional, debian/rules will download if missing) ==="
         
         # Try to pre-download the binary to speed up build
-        DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
+        DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$TAG_NAME/OpenList-Desktop-$VERSION.tar.gz"
         echo "Pre-download URL: $DOWNLOAD_URL"
         
         if wget -O "openlist-linux-$ARCH.tar.gz" "$DOWNLOAD_URL" 2>/dev/null; then
           echo "Pre-download successful"
-          ls -la openlist-linux-$ARCH.tar.gz
+          ls -la OpenList-Desktop-$VERSION.tar.gz
         else
           echo "Pre-download failed, debian/rules will handle download"
         fi
@@ -294,21 +294,21 @@ jobs:
         cd apt-repo
         
         # Copy DEB files
-        cp ../openlist-$VERSION-amd64.deb/openlist_${VERSION}-1_amd64.deb .
-        cp ../openlist-$VERSION-arm64.deb/openlist_${VERSION}-1_arm64.deb .
+        cp ../Openlist-Desktop-$VERSION-amd64.deb/openlist-desktop_${VERSION}-1_amd64.deb .
+        cp ../Openlist-Desktop-$VERSION-arm64.deb/openlist-desktop_${VERSION}-1_arm64.deb .
         
         echo "DEB files for APT repository:"
         ls -la *.deb
         
         # Create apt-ftparchive configuration
         cat > apt-ftparchive.conf << EOF
-        APT::FTPArchive::Release::Origin "OpenList";
-        APT::FTPArchive::Release::Label "OpenList APT Repository";
+        APT::FTPArchive::Release::Origin "OpenList Desktop";
+        APT::FTPArchive::Release::Label "OpenList Desktop APT Unofficial Repository";
         APT::FTPArchive::Release::Suite "./";
-        APT::FTPArchive::Release::Codename "openlist";
+        APT::FTPArchive::Release::Codename "openlist-desktop";
         APT::FTPArchive::Release::Architectures "amd64 arm64";
         APT::FTPArchive::Release::Components "";
-        APT::FTPArchive::Release::Description "OpenList APT Repository for direct GitHub Release access";
+        APT::FTPArchive::Release::Description "OpenList Desktop APT Repository for direct GitHub Release access";
         EOF
         
         # Generate Packages file using apt-ftparchive
@@ -343,13 +343,13 @@ jobs:
           
           # Export public key and create keyring file
           echo "Creating GPG keyring file..."
-          gpg --batch --yes --armor --export "$GPG_KEY_ID" > openlist-archive-keyring.asc
-          gpg --batch --yes --dearmor < openlist-archive-keyring.asc > openlist-archive-keyring.gpg
+          gpg --batch --yes --armor --export "$GPG_KEY_ID" > openlist-desktop-archive-keyring.asc
+          gpg --batch --yes --dearmor < openlist-desktop-archive-keyring.asc > openlist-desktop-archive-keyring.gpg
           
           # Verify keyring file
-          if [ -f "openlist-archive-keyring.gpg" ] && [ -s "openlist-archive-keyring.gpg" ]; then
+          if [ -f "openlist-desktop-archive-keyring.gpg" ] && [ -s "openlist-desktop-archive-keyring.gpg" ]; then
             echo "GPG keyring file created successfully"
-            ls -la openlist-archive-keyring.*
+            ls -la openlist-desktop-archive-keyring.*
           else
             echo "Warning: Failed to create GPG keyring file"
           fi
@@ -410,7 +410,7 @@ jobs:
             exit $exit_code
         }
 
-        echo -e "${CYAN}=== OpenList APT Repository Setup ===${NC}"
+        echo -e "${CYAN}=== OpenList Desktop APT Repository Setup ===${NC}"
 
         # Detect if running as root
         if [ "$EUID" -eq 0 ]; then
@@ -444,19 +444,19 @@ jobs:
 
         # Add GPG key to resolve signature verification issues
         log "Adding OpenList repository GPG key..." "info"
-        KEYRING_URL="https://github.com/GITHUB_REPO/releases/latest/download/openlist-archive-keyring.gpg"
-        KEYRING_PATH="/usr/share/keyrings/openlist-archive-keyring.gpg"
+        KEYRING_URL="https://github.com/GITHUB_REPO/releases/latest/download/openlist-desktop-archive-keyring.gpg"
+        KEYRING_PATH="/usr/share/keyrings/openlist-desktop-archive-keyring.gpg"
         
         # Try to download the pre-generated keyring file
-        if curl -fsSL "$KEYRING_URL" -o /tmp/openlist-archive-keyring.gpg 2>/dev/null; then
+        if curl -fsSL "$KEYRING_URL" -o /tmp/openlist-desktop-archive-keyring.gpg 2>/dev/null; then
             # Verify the downloaded file is not empty and is a valid GPG keyring
-            if [ -s /tmp/openlist-archive-keyring.gpg ]; then
-                $SUDO_CMD mv /tmp/openlist-archive-keyring.gpg "$KEYRING_PATH"
+            if [ -s /tmp/openlist-desktop-archive-keyring.gpg ]; then
+                $SUDO_CMD mv /tmp/openlist-desktop-archive-keyring.gpg "$KEYRING_PATH"
                 $SUDO_CMD chmod 644 "$KEYRING_PATH"
                 log "GPG keyring downloaded and installed successfully" "success"
             else
                 log "Downloaded keyring file is empty, falling back to trusted repository" "warning"
-                rm -f /tmp/openlist-archive-keyring.gpg
+                rm -f /tmp/openlist-desktop-archive-keyring.gpg
                 $SUDO_CMD touch "$KEYRING_PATH"
             fi
         else
@@ -471,22 +471,22 @@ jobs:
             log "Using modern sources format..." "info"
             
             # Use signed-by for modern systems, but fall back to trusted=yes if GPG key is not available
-            if [ -s /usr/share/keyrings/openlist-archive-keyring.gpg ]; then
+            if [ -s /usr/share/keyrings/openlist-desktop-archive-keyring.gpg ]; then
                 echo 'Types: deb
         URIs: https://github.com/GITHUB_REPO/releases/latest/download/
         Suites: ./
-        Signed-By: /usr/share/keyrings/openlist-archive-keyring.gpg' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.sources > /dev/null
+        Signed-By: /usr/share/keyrings/openlist-desktop-archive-keyring.gpg' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist-desktop.sources > /dev/null
             else
                 echo 'Types: deb
         URIs: https://github.com/GITHUB_REPO/releases/latest/download/
         Suites: ./
-        Trusted: yes' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.sources > /dev/null
+        Trusted: yes' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist-desktop.sources > /dev/null
             fi
         else
             log "Using legacy sources format..." "info"
             
             # Use signed-by for legacy systems, but fall back to trusted=yes if GPG key is not available
-            if [ -s /usr/share/keyrings/openlist-archive-keyring.gpg ]; then
+            if [ -s /usr/share/keyrings/openlist-desktop-archive-keyring.gpg ]; then
                 echo 'deb [signed-by=/usr/share/keyrings/openlist-archive-keyring.gpg] https://github.com/GITHUB_REPO/releases/latest/download/ ./' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.list > /dev/null
             else
                 echo 'deb [trusted=yes] https://github.com/GITHUB_REPO/releases/latest/download/ ./' | $SUDO_CMD tee /etc/apt/sources.list.d/openlist.list > /dev/null
@@ -502,14 +502,14 @@ jobs:
         else
             log "Repository configured successfully." "success"
             echo ""
-            log "To install OpenList, run: ${WHITE}apt-get install openlist -y${NC}" "info"
+            log "To install OpenList Desktop, run: ${WHITE}apt-get install openlist-desktop -y${NC}" "info"
             log "You can also use the following commands:" "info"
             echo ""
             echo -e "${PURPLE}Installation:${NC}"
             if [ "$EUID" -eq 0 ]; then
-                echo -e "  ${WHITE}apt-get install openlist -y${NC}          # Install OpenList"
+                echo -e "  ${WHITE}apt-get install openlist-desktop -y${NC}          # Install OpenList Desktop"
             else
-                echo -e "  ${WHITE}sudo apt-get install openlist -y${NC}     # Install OpenList"
+                echo -e "  ${WHITE}sudo apt-get install openlist openlist-desktop -y${NC}     # Install OpenList & Desktop Desktop"
             fi
             echo ""
             echo -e "${PURPLE}Service Management (after installation):${NC}"
@@ -572,10 +572,10 @@ jobs:
           --title "OpenList DEB Package $VERSION" \
           --notes "## DEB Package for OpenList $VERSION
 
-        This is an automated DEB package build from [OpenListTeam/OpenList $SOURCE_TAG](https://github.com/OpenListTeam/OpenList/releases/tag/$SOURCE_TAG).
+        This is an automated DEB package build from [OpenListTeam/OpenList $SOURCE_TAG](https://github.com/OpenListTeam/OpenList-Desktop/releases/tag/$SOURCE_TAG).
 
         ### 📦 Package Information
-        - **Source**: OpenListTeam/OpenList $SOURCE_TAG
+        - **Source**: OpenListTeam/OpenList-Desktop $SOURCE_TAG
         - **Package Version**: $VERSION-1
         - **Build Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
         - **Architectures**: AMD64, ARM64
@@ -590,48 +590,48 @@ jobs:
         curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-apt.sh | bash
         
         # Then install OpenList
-        sudo apt install openlist -y
+        sudo apt install openlist-desktop -y
         \`\`\`
 
         #### 📦 PPA Repository (Alternative - Launchpad)
         \`\`\`bash
         # Add PPA repository
-        sudo add-apt-repository ppa:openlist/server
+        sudo add-apt-repository ppa:wisephaeton/desktop
         sudo apt update
         
         # Install OpenList
-        sudo apt install openlist -y
+        sudo apt install openlist-desktop -y
         \`\`\`
 
         #### 🔐 Manual APT Setup with GPG Verification (Modern systems - Ubuntu 22.04+/Debian 12+)
         \`\`\`bash
         # Download and install GPG keyring
-        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg | \\
-          sudo tee /usr/share/keyrings/openlist-archive-keyring.gpg > /dev/null
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-desktop-archive-keyring.gpg | \\
+          sudo tee /usr/share/keyrings/openlist-desktop-archive-keyring.gpg > /dev/null
 
         # Add repository with GPG verification
         echo \"Types: deb
         URIs: https://github.com/${{ github.repository }}/releases/latest/download/
         Suites: ./
-        Signed-By: /usr/share/keyrings/openlist-archive-keyring.gpg\" | \\
-          sudo tee /etc/apt/sources.list.d/openlist.sources
+        Signed-By: /usr/share/keyrings/openlist-desktop-archive-keyring.gpg\" | \\
+          sudo tee /etc/apt/sources.list.d/openlist-desktop.sources
 
         # Update and install
-        sudo apt update && sudo apt install openlist -y
+        sudo apt update && sudo apt install openlist-desktop -y
         \`\`\`
 
         #### 🔐 Manual APT Setup with GPG Verification (Legacy systems - Ubuntu <22.04/Debian <12)
         \`\`\`bash
         # Download and install GPG keyring
-        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg | \\
-          sudo tee /usr/share/keyrings/openlist-archive-keyring.gpg > /dev/null
+        curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-desktop-archive-keyring.gpg | \\
+          sudo tee /usr/share/keyrings/openlist-desktop-archive-keyring.gpg > /dev/null
 
         # Add repository with GPG verification
         echo \"deb [signed-by=/usr/share/keyrings/openlist-archive-keyring.gpg] https://github.com/${{ github.repository }}/releases/latest/download/ ./\" | \\
-          sudo tee /etc/apt/sources.list.d/openlist.list
+          sudo tee /etc/apt/sources.list.d/openlist-desktop.list
 
         # Update and install
-        sudo apt update && sudo apt install openlist -y
+        sudo apt update && sudo apt install openlist-desktop -y
         \`\`\`
 
         #### ⚠️ Manual APT Setup without GPG Verification (Not Recommended)
@@ -640,14 +640,14 @@ jobs:
         echo \"Types: deb
         URIs: https://github.com/${{ github.repository }}/releases/latest/download/
         Suites: ./
-        Trusted: yes\" | sudo tee /etc/apt/sources.list.d/openlist.sources
+        Trusted: yes\" | sudo tee /etc/apt/sources.list.d/openlist-desktop.sources
 
         # Legacy systems (Ubuntu <22.04/Debian <12)
         echo \"deb [trusted=yes] https://github.com/${{ github.repository }}/releases/latest/download/ ./\" | \\
-          sudo tee /etc/apt/sources.list.d/openlist.list
+          sudo tee /etc/apt/sources.list.d/openlist-desktop.list
 
         # Update and install
-        sudo apt update && sudo apt install openlist -y
+        sudo apt update && sudo apt install openlist-desktop -y
         \`\`\`
 
         #### 📦 Direct Download (AMD64)
@@ -660,13 +660,13 @@ jobs:
         #### 📦 Direct Download (ARM64)
         \`\`\`bash
         wget https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/openlist_${VERSION}-1_arm64.deb
-        sudo dpkg -i openlist_${VERSION}-1_arm64.deb
+        sudo dpkg -i openlist-desktop_${VERSION}-1_arm64.deb
         sudo apt-get install -f  # Fix any dependency issues
         \`\`\`
 
         ### 🔐 GPG Key Information
         - **GPG Signed**: $([ -f apt-repo/Release.gpg ] && echo 'Yes' || echo 'No')
-        - **Keyring File**: [openlist-archive-keyring.gpg](https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg)
+        - **Keyring File**: [openlist-desktop-archive-keyring.gpg](https://github.com/${{ github.repository }}/releases/latest/download/openlist-desktop-archive-keyring.gpg)
         - **Verification**: Repository packages are cryptographically signed for security
 
         ### 🔧 Service Management
@@ -689,10 +689,10 @@ jobs:
         \`\`\`
 
         ### 📁 File Locations
-        - **Binary**: \`/var/lib/openlist/openlist\`
+        - **Binary**: \`/var/lib/openlist/openlist-desktop\`
         - **Working Directory**: \`/var/lib/openlist\`
         - **Service File**: \`/usr/lib/systemd/system/openlist.service\`
-        - **Command Symlink**: \`/usr/bin/openlist\`
+        - **Command Symlink**: \`/usr/bin/openlist-desktop\`
         - **Configuration**: \`/var/lib/openlist/\` (auto-generated)
         - **Logs**: \`journalctl -u openlist\` or \`/var/log/syslog\`
 
@@ -703,11 +703,11 @@ jobs:
         systemctl is-active openlist
         
         # Check if repository is properly configured
-        apt policy openlist
+        apt policy openlist-desktop
         
         # Verify GPG signature (if using signed repository)
-        apt-key list | grep -i openlist  # Legacy systems
-        gpg --show-keys /usr/share/keyrings/openlist-archive-keyring.gpg  # Modern systems
+        apt-key list | grep -i openlist-desktop  # Legacy systems
+        gpg --show-keys /usr/share/keyrings/openlist-desktop-archive-keyring.gpg  # Modern systems
         \`\`\`
 
         ### 🗑️ Uninstallation
@@ -723,9 +723,9 @@ jobs:
         sudo apt purge openlist
 
         # Remove repository configuration
-        sudo rm -f /etc/apt/sources.list.d/openlist.sources  # Modern systems
-        sudo rm -f /etc/apt/sources.list.d/openlist.list     # Legacy systems
-        sudo rm -f /usr/share/keyrings/openlist-archive-keyring.gpg
+        sudo rm -f /etc/apt/sources.list.d/openlist-desktop.sources  # Modern systems
+        sudo rm -f /etc/apt/sources.list.d/openlist-desktop.list     # Legacy systems
+        sudo rm -f /usr/share/keyrings/openlist-desktop-archive-keyring.gpg
 
         # Update package list
         sudo apt update
@@ -738,7 +738,7 @@ jobs:
         
         # Re-download GPG key
         curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/openlist-archive-keyring.gpg | \\
-          sudo tee /usr/share/keyrings/openlist-archive-keyring.gpg > /dev/null
+          sudo tee /usr/share/keyrings/openlist-desktop-archive-keyring.gpg > /dev/null
         
         # Check service logs for issues
         sudo journalctl -u openlist --no-pager
@@ -751,8 +751,8 @@ jobs:
 
         ---
         **🔒 Security Note**: This repository is GPG-signed for package integrity verification. The automatic installation script will set up GPG verification by default. For maximum security, always use the GPG-verified installation methods." \
-          openlist-$VERSION-amd64.deb/openlist_${VERSION}-1_amd64.deb \
-          openlist-$VERSION-arm64.deb/openlist_${VERSION}-1_arm64.deb \
+          OpenList-Desktop-$VERSION-amd64.deb/openList-desktop_${VERSION}-1_amd64.deb \
+          Openlist-Desktop-$VERSION-arm64.deb/openlist-desktop_${VERSION}-1_arm64.deb \
           $(echo $FILES_TO_UPLOAD | sed 's|^|apt-repo/|g; s| | apt-repo/|g')
 
   upload-to-ppa:
@@ -787,8 +787,8 @@ jobs:
         echo "CLEAN_VERSION: $CLEAN_VERSION"
         
         # Create minimal source directory structure (no need to download full OpenList source)
-        mkdir -p "openlist-${CLEAN_VERSION}"
-        cd "openlist-${CLEAN_VERSION}"
+        mkdir -p "openlist-desktop-${CLEAN_VERSION}"
+        cd "openlist-desktop-${CLEAN_VERSION}"
         
         # Create minimal source files required for PPA
         echo "Creating minimal source structure..."
@@ -819,27 +819,27 @@ jobs:
         EOF
         
         # Download binaries for both architectures that PPA will need
-        echo "=== Downloading OpenList binaries ==="
+        echo "=== Downloading OpenList Desktop binaries ==="
         mkdir -p debian/binaries
         
         for ARCH in amd64 arm64; do
-          BINARY_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
+          BINARY_URL="https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$TAG_NAME/OpenList-Desktop-$ARCH.tar.gz"
           echo "Downloading binary for $ARCH..."
           echo "URL: $BINARY_URL"
           
           # Use wget with progress bar instead of verbose output to reduce log spam
-          if wget --progress=bar:force:noscroll -O "debian/binaries/openlist-linux-$ARCH.tar.gz" "$BINARY_URL" 2>&1; then
-            echo "✅ Successfully downloaded openlist-linux-$ARCH.tar.gz"
-            FILE_SIZE=$(ls -lh debian/binaries/openlist-linux-$ARCH.tar.gz | awk '{print $5}')
+          if wget --progress=bar:force:noscroll -O "debian/binaries/OpenList-Desktop-linux-$ARCH.tar.gz" "$BINARY_URL" 2>&1; then
+            echo "✅ Successfully downloaded OpenList-Desktop$ARCH.tar.gz"
+            FILE_SIZE=$(ls -lh debian/binaries/OpenList-Desktop-$ARCH.tar.gz | awk '{print $5}')
             echo "📦 File size: $FILE_SIZE"
             
             # Verify the file is not empty
-            if [ ! -s "debian/binaries/openlist-linux-$ARCH.tar.gz" ]; then
+            if [ ! -s "debian/binaries/OpenList-Desktop-$ARCH.tar.gz" ]; then
               echo "❌ Error: Downloaded file is empty"
               exit 1
             fi
           else
-            echo "❌ Error: Failed to download openlist-linux-$ARCH.tar.gz"
+            echo "❌ Error: Failed to download OpenList-Desktop-$ARCH.tar.gz"
             exit 1
           fi
           
@@ -855,10 +855,10 @@ jobs:
         
         # Create the orig.tar.gz from our minimal source (required for PPA)
         echo "Creating orig.tar.gz from minimal source..."
-        tar -czf "openlist_${CLEAN_VERSION}.orig.tar.gz" "openlist-${CLEAN_VERSION}"
+        tar -czf "openlist-desktop_${CLEAN_VERSION}.orig.tar.gz" "openlist-desktop-${CLEAN_VERSION}"
         
         echo "Created minimal source package:"
-        ls -la openlist_${CLEAN_VERSION}.orig.tar.gz
+        ls -la openlist-desktop_${CLEAN_VERSION}.orig.tar.gz
         
     - name: Set up GPG
       env:
@@ -917,31 +917,31 @@ jobs:
         [ppa]
         fqdn = ppa.launchpad.net
         method = ftp
-        incoming = ~openlist/ubuntu/server/
+        incoming = ~wisephaeton/ubuntu/desktop/
         login = anonymous
         allow_unsigned_uploads = 0
         EOF
         
         # Copy debian directory to source directory
         echo "Copying debian packaging files..."
-        cp -r debian openlist-${CLEAN_VERSION}/
+        cp -r debian openlist-desktop-${CLEAN_VERSION}/
         
         # Verify that pre-downloaded binaries are in the source package
         echo "Verifying pre-downloaded binaries in source package..."
-        if [ -d "openlist-${CLEAN_VERSION}/debian/binaries" ]; then
+        if [ -d "openlist-desktop-${CLEAN_VERSION}/debian/binaries" ]; then
           echo "✅ Binaries found in source package:"
-          ls -la openlist-${CLEAN_VERSION}/debian/binaries/
+          ls -la openlist-desktop-${CLEAN_VERSION}/debian/binaries/
         else
           echo "❌ No binaries found in source package - this should not happen"
           echo "Contents of source directory:"
-          ls -la openlist-${CLEAN_VERSION}/
+          ls -la openlist-desktop-${CLEAN_VERSION}/
           echo "Contents of debian directory:"
-          ls -la openlist-${CLEAN_VERSION}/debian/
+          ls -la openlist-desktop-${CLEAN_VERSION}/debian/
           exit 1
         fi
         
         # Enter source directory
-        cd openlist-${CLEAN_VERSION}
+        cd openlist-desktop-${CLEAN_VERSION}
         
         # Update changelog for PPA with clean version and correct distribution
         UBUNTU_RELEASE="${{ matrix.ubuntu_release }}"
@@ -969,7 +969,7 @@ jobs:
           echo "Custom version will be: $TEST_FULL_VERSION"
           
           # Check if this custom version already exists (warn but continue)
-          DSC_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${TEST_FULL_VERSION}.dsc"
+          DSC_URL="https://ppa.launchpadcontent.net/wisephaeton/desktop/ubuntu/pool/main/o/openlist-desktop/openlist-desktop_${TEST_FULL_VERSION}.dsc"
           if curl -s --head "$DSC_URL" | grep -q "200 OK"; then
             echo "⚠️  WARNING: Custom version $TEST_FULL_VERSION already exists in PPA!"
             echo "⚠️  This upload may fail or overwrite the existing package."
@@ -993,7 +993,7 @@ jobs:
             VERSION_EXISTS=false
             
             # 方法1: 检查.dsc文件
-            DSC_URL="https://ppa.launchpadcontent.net/openlist/server/ubuntu/pool/main/o/openlist/openlist_${TEST_FULL_VERSION}.dsc"
+            DSC_URL="https://ppa.launchpadcontent.net/wisephaeton/desktop/ubuntu/pool/main/o/openlist-desktop/openlist-desktop_${TEST_FULL_VERSION}.dsc"
             echo "Method 1: Checking .dsc file..."
             if curl -s --head "$DSC_URL" | grep -q "200 OK"; then
               echo "Found .dsc file - version $TEST_FULL_VERSION exists"
@@ -1005,7 +1005,7 @@ jobs:
             # 方法2: 检查Launchpad API (如果方法1没有发现)
             if [ "$VERSION_EXISTS" = false ]; then
               echo "Method 2: Checking Launchpad API..."
-              API_URL="https://api.launchpad.net/1.0/~openlist/+archive/ubuntu/server"
+              API_URL="https://api.launchpad.net/1.0/~wisephaeton/+archive/ubuntu/desktop"
               API_RESPONSE=$(curl -s "${API_URL}?ws.op=getPublishedSources&source_name=openlist&distro_series=/ubuntu/${UBUNTU_RELEASE}" 2>/dev/null || echo "")
               
               if echo "$API_RESPONSE" | grep -q "\"version\": \"$TEST_FULL_VERSION\""; then
@@ -1047,13 +1047,13 @@ jobs:
         echo "Full package version will be: $CLEAN_VERSION-$VERSION_SUFFIX"
         
         cat > debian/changelog << EOF
-        openlist ($CLEAN_VERSION-$VERSION_SUFFIX) $UBUNTU_RELEASE; urgency=medium
+        openlist-desktop ($CLEAN_VERSION-$VERSION_SUFFIX) $UBUNTU_RELEASE; urgency=medium
 
-          * DEB package built from OpenListTeam/OpenList $TAG_NAME
+          * DEB package built from OpenListTeam/OpenList-Desktop $TAG_NAME
           * Automated build for PPA distribution (Ubuntu $UBUNTU_RELEASE)
           * Binary downloaded from official release
 
-         -- OpenList Team <openlistteam@gmail.com>  $(date -R)
+         -- Lycaon Constantine Cayde <kamialef2345@gmail.com>, original distributed by OpenList Team <openlistteam@gmail.com>  $(date -R)
         EOF
         
         # Fix debian/control file - ensure it ends with newline
@@ -1074,12 +1074,12 @@ jobs:
         if [ ! -f debian/copyright ]; then
           cat > debian/copyright << 'COPYRIGHT_EOF'
         Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-        Upstream-Name: openlist
+        Upstream-Name: openlist-desktop
         Upstream-Contact: OpenList Team <openlistteam@gmail.com>
-        Source: https://github.com/OpenListTeam/OpenList
+        Source: https://github.com/OpenListTeam/OpenList-Desktop
 
         Files: *
-        Copyright: 2025 OpenList Team
+        Copyright: 2025 Lycaon Constantine Cayde, originally produce by OpenList Team
         License: AGPL-3.0+
 
         License: AGPL-3.0+
@@ -1171,8 +1171,8 @@ jobs:
             echo "🔐 Signing source package manually..."
             cd ..
             
-            DSC_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}.dsc"
-            CHANGES_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}_source.changes"
+            DSC_FILE="openlist-desktop_${CLEAN_VERSION}-${VERSION_SUFFIX}.dsc"
+            CHANGES_FILE="openlist-desktop_${CLEAN_VERSION}-${VERSION_SUFFIX}_source.changes"
             
             if [ -f "$DSC_FILE" ] && [ -f "$CHANGES_FILE" ]; then
               # Sign .dsc file
@@ -1197,7 +1197,7 @@ jobs:
               exit 1
             fi
             
-            cd openlist-${CLEAN_VERSION}
+            cd openlist-desktop-${CLEAN_VERSION}
           else
             echo "❌ Even unsigned build failed"
             exit 1
@@ -1209,24 +1209,24 @@ jobs:
         
         echo "=== Verifying generated files ==="
         echo "Generated files for PPA upload:"
-        ls -la openlist_${CLEAN_VERSION}-*
+        ls -la openlist-desktop_${CLEAN_VERSION}-*
         
         # Find the correct changes file with version suffix
-        CHANGES_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}_source.changes"
-        DSC_FILE="openlist_${CLEAN_VERSION}-${VERSION_SUFFIX}.dsc"
+        CHANGES_FILE="openlist-desktop_${CLEAN_VERSION}-${VERSION_SUFFIX}_source.changes"
+        DSC_FILE="openlist-desktop_${CLEAN_VERSION}-${VERSION_SUFFIX}.dsc"
         
         # Verify files exist
         if [ ! -f "$CHANGES_FILE" ]; then
           echo "❌ Changes file not found: $CHANGES_FILE"
           echo "Available files:"
-          ls -la openlist_${CLEAN_VERSION}-*
+          ls -la openlist-desktop_${CLEAN_VERSION}-*
           exit 1
         fi
         
         if [ ! -f "$DSC_FILE" ]; then
           echo "❌ DSC file not found: $DSC_FILE"
           echo "Available files:"
-          ls -la openlist_${CLEAN_VERSION}-*
+          ls -la openlist-desktop_${CLEAN_VERSION}-*
           exit 1
         fi
         
