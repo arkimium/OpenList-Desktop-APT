@@ -8,7 +8,7 @@ Homepage: https://github.com/OpenListTeam/OpenList-Desktop
 Vcs-Git: https://github.com/OpenListTeam/OpenList-Desktop.git
 Vcs-Browser: https://github.com/OpenListTeam/OpenList-Desktop
 
-Package: openlist-desktop
+Package: openlist, openlist-desktop
 Architecture: amd64 arm64
 Depends: ${misc:Depends}, systemd, adduser
 Description: OpenList - A modern file management and sharing platform
