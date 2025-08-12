@@ -1,14 +1,14 @@
-Source: openlist
+Source: openlist-desktop
 Section: utils
 Priority: optional
 Maintainer: OpenListTeam <openlistteam@gmail.com>
 Build-Depends: debhelper (>= 10), wget
-Standards-Version: 4.1.2
-Homepage: https://github.com/OpenListTeam/OpenList
-Vcs-Git: https://github.com/OpenListTeam/OpenList.git
-Vcs-Browser: https://github.com/OpenListTeam/OpenList
+Standards-Version: 0.6.1
+Homepage: https://github.com/OpenListTeam/OpenList-Desktop
+Vcs-Git: https://github.com/OpenListTeam/OpenList-Desktop.git
+Vcs-Browser: https://github.com/OpenListTeam/OpenList-Desktop
 
-Package: openlist
+Package: openlist-desktop
 Architecture: amd64 arm64
 Depends: ${misc:Depends}, systemd, adduser
 Description: OpenList - A modern file management and sharing platform
