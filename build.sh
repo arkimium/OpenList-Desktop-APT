@@ -128,7 +128,7 @@ echo "Architecture: $ARCH"
 echo "=== Checking for required tools ==="
 MISSING_TOOLS=()
 
-for tool in wget tar dpkg-buildpackage debhelper; do
+for tool in wget tar dpkg-buildpackage dh; do
     if ! command -v $tool &> /dev/null; then
         MISSING_TOOLS+=("$tool")
     fi
@@ -147,7 +147,7 @@ DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList-Desktop/releases/download
 echo "Download URL: $DOWNLOAD_URL"
 
 if ! wget -O "OpenList-Desktop-$CLEAN_VERSION.tar.gz" "$DOWNLOAD_URL"; then
-    echo "Error: Failed to download binary for $CLEAR_VERSION"
+    echo "Error: Failed to download binary for $CLEAN_VERSION"
     echo "Please check if the release exists and the URL is correct"
     exit 1
 fi
@@ -185,7 +185,7 @@ openlist-desktop ($CLEAN_VERSION-1) unstable; urgency=medium
   * Automated build for $ARCH architecture
   * Binary downloaded from official release
 
- -- Lycaon Constantine Cayde <kamialef2345@gmail.com>, original produce by OpenListTeam <openlistteam@gmail.com>  $(date -R)
+ -- OpenListTeam <openlistteam@gmail.com>  $(date -R)
 EOF
 
 echo "Generated changelog:"
@@ -270,3 +270,4 @@ echo "✓ Version: $CLEAN_VERSION"
 echo "✓ Architecture: $ARCH"
 echo "✓ Package: $PACKAGE_PATH"
 echo "✓ Build completed successfully!"
+
