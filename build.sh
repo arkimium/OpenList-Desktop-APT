@@ -57,7 +57,7 @@ echo "Architecture: $ARCH"
 
 # Get latest version from GitHub if not specified
 if [[ "$USE_LATEST" == "true" ]]; then
-    echo "Fetching latest OpenList version from GitHub..."
+    echo "Fetching latest OpenList Desktop version from GitHub..."
     
     # Check if jq is available
     if ! command -v jq &> /dev/null; then
@@ -69,7 +69,7 @@ if [[ "$USE_LATEST" == "true" ]]; then
     
     # Get latest release info with better error handling
     echo "Calling GitHub API..."
-    RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList/releases/latest")
+    RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList-Desktop/releases/latest")
     
     if [ "$DEBUG" = "true" ]; then
         echo "API Response:"
@@ -83,7 +83,7 @@ if [[ "$USE_LATEST" == "true" ]]; then
         echo "Trying alternative approach..."
         
         # Try to get the first release if latest fails
-        RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList/releases" | jq '.[0]')
+        RELEASE_INFO=$(curl -s "https://api.github.com/repos/OpenListTeam/OpenList-Desktop/releases" | jq '.[0]')
         TAG_NAME=$(echo "$RELEASE_INFO" | jq -r '.tag_name // empty')
         
         if [ -z "$TAG_NAME" ] || [ "$TAG_NAME" = "null" ] || [ "$TAG_NAME" = "empty" ]; then
@@ -120,7 +120,7 @@ if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
     exit 1
 fi
 
-echo "Building OpenList DEB package..."
+echo "Building OpenList Desktop DEB package..."
 echo "Version: $CLEAN_VERSION"
 echo "Architecture: $ARCH"
 
@@ -141,60 +141,51 @@ if [ ${#MISSING_TOOLS[@]} -ne 0 ]; then
     exit 1
 fi
 
-# Install cross-compilation tools for ARM64 if needed and not already installed
-if [[ "$ARCH" == "arm64" ]]; then
-    if ! command -v aarch64-linux-gnu-gcc &> /dev/null; then
-        echo "Installing cross-compilation tools for ARM64..."
-        sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu
-    fi
-fi
-
 # Download binary
 echo "=== Downloading OpenList binary for $ARCH ==="
-DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList/releases/download/$TAG_NAME/openlist-linux-$ARCH.tar.gz"
+DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$TAG_NAME/OpenList-Desktop-$CLEAN_VERSION.tar.gz"
 echo "Download URL: $DOWNLOAD_URL"
 
-if ! wget -O "openlist-linux-$ARCH.tar.gz" "$DOWNLOAD_URL"; then
-    echo "Error: Failed to download binary for $ARCH"
+if ! wget -O "OpenList-Desktop-$CLEAN_VERSION.tar.gz" "$DOWNLOAD_URL"; then
+    echo "Error: Failed to download binary for $CLEAR_VERSION"
     echo "Please check if the release exists and the URL is correct"
     exit 1
 fi
 
 # Verify download
-if [ ! -f "openlist-linux-$ARCH.tar.gz" ]; then
+if [ ! -f "OpenList-Desktop-$CLEAN_VERSION.tar.gz" ]; then
     echo "Error: Downloaded file not found"
     exit 1
 fi
 
-echo "Downloaded file size: $(ls -lh openlist-linux-$ARCH.tar.gz | awk '{print $5}')"
+echo "Downloaded file size: $(ls -lh OpenList-Desktop-$CLEAN_VERSION.tar.gz | awk '{print $5}')"
 
 # Extract and verify binary
 echo "=== Verifying downloaded binary ==="
 mkdir -p test_extract
-tar -xzf "openlist-linux-$ARCH.tar.gz" -C test_extract
+tar -xzf "OpenList-Desktop-$CLEAN_VERSION.tar.gz" -C test_extract
 
-if [ ! -f "test_extract/openlist" ]; then
+if [ ! -f "test_extract/openlist-desktop" ]; then
     echo "Error: Binary not found in archive"
     echo "Archive contents:"
-    tar -tzf "openlist-linux-$ARCH.tar.gz"
+    tar -tzf "OpenList-Desktop-$CLEAN_VERSION.tar.gz"
     exit 1
 fi
 
-echo "Binary file size: $(ls -lh test_extract/openlist | awk '{print $5}')"
+echo "Binary file size: $(ls -lh test_extract/openlist-desktop | awk '{print $5}')"
 rm -rf test_extract
 echo "Binary verified successfully"
 
 # Update changelog with clean version (no 'v' prefix)
 echo "=== Updating changelog ==="
 cat > debian/changelog << EOF
-openlist ($CLEAN_VERSION-1) unstable; urgency=medium
+openlist-desktop ($CLEAN_VERSION-1) unstable; urgency=medium
 
-  * DEB package built from OpenListTeam/OpenList $TAG_NAME
+  * DEB package built from OpenListTeam/OpenList-Desktop $TAG_NAME
   * Automated build for $ARCH architecture
   * Binary downloaded from official release
 
- -- OpenListTeam <openlistteam@gmail.com>  $(date -R)
+ -- Lycaon Constantine Cayde <kamialef2345@gmail.com>, original produce by OpenListTeam <openlistteam@gmail.com>  $(date -R)
 EOF
 
 echo "Generated changelog:"
@@ -233,10 +224,10 @@ else
 fi
 
 # Cleanup
-rm -f "openlist-linux-$ARCH.tar.gz"
+rm -f "OpenList-Desktop-$CLEAN_VERSION.tar.gz"
 
 # Check for generated package
-EXPECTED_DEB="openlist_${CLEAN_VERSION}-1_${ARCH}.deb"
+EXPECTED_DEB="openlist-desktop_${CLEAN_VERSION}-1_${ARCH}.deb"
 if [ -f "$EXPECTED_DEB" ]; then
     echo "=== Build completed successfully! ==="
     echo "Package file: $EXPECTED_DEB"
