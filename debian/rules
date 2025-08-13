@@ -22,69 +22,69 @@ override_dh_auto_install:
 	@echo "=== Debian Rules: override_dh_auto_install ==="
 	@echo "Looking for binary for architecture: $(DEB_HOST_ARCH)"
 	# First check if binary is pre-downloaded in debian/binaries/ (for PPA builds)
-	if [ -f "debian/binaries/openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
+	if [ -f "debian/binaries/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" ]; then \
 		echo "Found pre-downloaded binary in debian/binaries/"; \
-		cp "debian/binaries/openlist-linux-$(DEB_HOST_ARCH).tar.gz" "openlist-linux-$(DEB_HOST_ARCH).tar.gz"; \
-	elif [ ! -f "openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
+		cp "debian/binaries/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz"; \
+	elif [ ! -f "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" ]; then \
 		echo "Binary archive not found, downloading..."; \
-		echo "Download URL: https://github.com/OpenListTeam/OpenList/releases/download/$(SOURCE_TAG)/openlist-linux-$(DEB_HOST_ARCH).tar.gz"; \
-		wget -O "openlist-linux-$(DEB_HOST_ARCH).tar.gz" \
-			"https://github.com/OpenListTeam/OpenList/releases/download/$(SOURCE_TAG)/openlist-linux-$(DEB_HOST_ARCH).tar.gz" || \
+		echo "Download URL: https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$(SOURCE_TAG)/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz"; \
+		wget -O "Desktop-Linux-$(DEB_HOST_ARCH).tar.gz" \
+			"https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$(SOURCE_TAG)/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" || \
 		(echo "Failed to download binary archive"; exit 1); \
 	fi
 	mkdir -p temp_extract
-	if [ -f "openlist-linux-$(DEB_HOST_ARCH).tar.gz" ]; then \
-		echo "Found binary archive: openlist-linux-$(DEB_HOST_ARCH).tar.gz"; \
-		echo "Archive size: $$(ls -lh openlist-linux-$(DEB_HOST_ARCH).tar.gz | awk '{print $$5}')"; \
+	if [ -f "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" ]; then \
+		echo "Found binary archive: OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz"; \
+		echo "Archive size: $$(ls -lh OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz | awk '{print $$5}')"; \
 		echo "Extracting to temporary directory"; \
-		tar -xzf "openlist-linux-$(DEB_HOST_ARCH).tar.gz" -C temp_extract; \
+		tar -xzf "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" -C temp_extract; \
 		echo "Extraction completed"; \
 	else \
-		echo "Error: Binary archive openlist-linux-$(DEB_HOST_ARCH).tar.gz not found"; \
+		echo "Error: Binary archive OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz not found"; \
 		exit 1; \
 	fi
 	@echo "Checking extracted contents:"
 	@ls -la temp_extract/
-	if [ ! -f "temp_extract/openlist" ]; then \
+	if [ ! -f "temp_extract/openlist-desktop" ]; then \
 		echo "Error: openlist binary not found after extraction"; \
 		echo "Contents of extraction directory:"; \
 		find temp_extract/ -type f -exec ls -la {} \; || echo "Directory is empty"; \
 		echo "Checking what was in the archive:"; \
-		tar -tzf "openlist-linux-$(DEB_HOST_ARCH).tar.gz" || echo "Cannot list archive contents"; \
+		tar -tzf "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" || echo "Cannot list archive contents"; \
 		exit 1; \
 	fi
-	mkdir -p debian/openlist/var/lib/openlist
-	mkdir -p debian/openlist/usr/bin
-	mkdir -p debian/openlist/usr/lib/systemd/system
-	cp temp_extract/openlist debian/openlist/var/lib/openlist/
-	chmod +x debian/openlist/var/lib/openlist/openlist
-	cp debian/openlist.service debian/openlist/usr/lib/systemd/system/
-	echo '#!/bin/bash' > debian/openlist/usr/bin/openlist
-	echo '# OpenList wrapper script' >> debian/openlist/usr/bin/openlist
-	echo '# Automatically adds --force-bin-dir to all commands' >> debian/openlist/usr/bin/openlist
-	echo '' >> debian/openlist/usr/bin/openlist
-	echo 'BINARY="/var/lib/openlist/openlist"' >> debian/openlist/usr/bin/openlist
-	echo '' >> debian/openlist/usr/bin/openlist
-	echo '# Check if the binary exists' >> debian/openlist/usr/bin/openlist
-	echo 'if [ ! -x "$$BINARY" ]; then' >> debian/openlist/usr/bin/openlist
-	echo '    echo "Error: OpenList binary not found at $$BINARY"' >> debian/openlist/usr/bin/openlist
-	echo '    exit 1' >> debian/openlist/usr/bin/openlist
-	echo 'fi' >> debian/openlist/usr/bin/openlist
-	echo '' >> debian/openlist/usr/bin/openlist
-	echo '# Check if --force-bin-dir is already present in arguments' >> debian/openlist/usr/bin/openlist
-	echo 'if [[ "$$*" != *"--force-bin-dir"* ]]; then' >> debian/openlist/usr/bin/openlist
-	echo '    # Add --force-bin-dir to all commands' >> debian/openlist/usr/bin/openlist
-	echo '    exec "$$BINARY" "$$@" --force-bin-dir' >> debian/openlist/usr/bin/openlist
-	echo 'else' >> debian/openlist/usr/bin/openlist
-	echo '    # --force-bin-dir already present, pass through as-is' >> debian/openlist/usr/bin/openlist
-	echo '    exec "$$BINARY" "$$@"' >> debian/openlist/usr/bin/openlist
-	echo 'fi' >> debian/openlist/usr/bin/openlist
-	chmod +x debian/openlist/usr/bin/openlist
+	mkdir -p debian/openlist-desktop/var/lib/openlist
+	mkdir -p debian/openlist-desktop/usr/bin
+	mkdir -p debian/openlist-desktop/usr/lib/systemd/system
+	cp temp_extract/openlist-desktop debian/openlist-desktop/var/lib/openlist/
+	chmod +x debian/openlist-desktop/var/lib/openlist/openlist-desktop
+	cp debian/openlist.service debian/openlist-desktop/usr/lib/systemd/system/
+	echo '#!/bin/bash' > debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '# OpenList Desktop wrapper script' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '# Automatically adds --force-bin-dir to all commands' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo 'BINARY="/var/lib/openlist/openlist-desktop"' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '# Check if the binary exists' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo 'if [ ! -x "$$BINARY" ]; then' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '    echo "Error: OpenList Desktop binary not found at $$BINARY"' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '    exit 1' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo 'fi' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '# Check if --force-bin-dir is already present in arguments' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo 'if [[ "$$*" != *"--force-bin-dir"* ]]; then' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '    # Add --force-bin-dir to all commands' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '    exec "$$BINARY" "$$@" --force-bin-dir' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo 'else' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '    # --force-bin-dir already present, pass through as-is' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo '    exec "$$BINARY" "$$@"' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	echo 'fi' >> debian/openlist-desktop/usr/bin/openlist-desktop
+	chmod +x debian/openlist-desktop/usr/bin/openlist-desktop
 	rm -rf temp_extract
 	@echo "Files installed to package directory:"
-	@find debian/openlist -type f -exec ls -la {} \;
+	@find debian/openlist-desktop -type f -exec ls -la {} \;
 	@echo "Wrapper script content:"
-	@cat debian/openlist/usr/bin/openlist
+	@cat debian/openlist-desktop/usr/bin/openlist-desktop
 
 override_dh_install:
 	@echo "Skipping dh_install - files already installed manually"
@@ -106,7 +106,7 @@ override_dh_shlibdeps:
 
 override_dh_auto_clean:
 	@echo "=== Debian Rules: override_dh_auto_clean ==="
-	rm -f openlist-linux-*.tar.gz
+	rm -f OpenList-Desktop-*.tar.gz
 	rm -rf temp_extract
 	# Preserve debian/binaries directory during build process
 	# It contains pre-downloaded binaries for PPA builds
