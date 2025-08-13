@@ -21,44 +21,51 @@ override_dh_auto_build:
 override_dh_auto_install:
 	@echo "=== Debian Rules: override_dh_auto_install ==="
 	@echo "Looking for binary for architecture: $(DEB_HOST_ARCH)"
-	# First check if binary is pre-downloaded in debian/binaries/ (for PPA builds)
-	if [ -f "debian/binaries/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" ]; then \
-		echo "Found pre-downloaded binary in debian/binaries/"; \
-		cp "debian/binaries/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz"; \
-	elif [ ! -f "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" ]; then \
-		echo "Binary archive not found, downloading..."; \
-		echo "Download URL: https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$(SOURCE_TAG)/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz"; \
-		wget -O "Desktop-Linux-$(DEB_HOST_ARCH).tar.gz" \
-			"https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$(SOURCE_TAG)/OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" || \
-		(echo "Failed to download binary archive"; exit 1); \
+
+	# Define .deb file name based on version and architecture
+	DEB_FILE_NAME="OpenList.Desktop_$(DEB_VERSION)_$(DEB_HOST_ARCH).deb"
+
+	# Download the .deb file if it doesn't already exist
+	if [ ! -f "$$DEB_FILE_NAME" ]; then \
+		echo "Debian package '$$DEB_FILE_NAME' not found, downloading..."; \
+		DOWNLOAD_URL="https://github.com/OpenListTeam/OpenList-Desktop/releases/download/$(SOURCE_TAG)/$$DEB_FILE_NAME"; \
+		echo "Download URL: $$DOWNLOAD_URL"; \
+		wget -O "$$DEB_FILE_NAME" "$$DOWNLOAD_URL" || \
+		(echo "Failed to download .deb file from $$DOWNLOAD_URL"; exit 1); \
 	fi
+
+	# Extract the .deb file to a temporary directory
 	mkdir -p temp_extract
-	if [ -f "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" ]; then \
-		echo "Found binary archive: OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz"; \
-		echo "Archive size: $$(ls -lh OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz | awk '{print $$5}')"; \
-		echo "Extracting to temporary directory"; \
-		tar -xzf "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" -C temp_extract; \
-		echo "Extraction completed"; \
-	else \
-		echo "Error: Binary archive OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz not found"; \
-		exit 1; \
-	fi
+	echo "Extracting '$$DEB_FILE_NAME' to temporary directory...";
+	dpkg-deb -x "$$DEB_FILE_NAME" temp_extract;
+	echo "Extraction completed.";
+
 	@echo "Checking extracted contents:"
-	@ls -la temp_extract/
-	if [ ! -f "temp_extract/openlist-desktop" ]; then \
-		echo "Error: openlist binary not found after extraction"; \
+	@ls -la temp_extract/var/lib/openlist/
+
+	# The binary is located at /var/lib/openlist/openlist-desktop inside the .deb
+	EXTRACTED_BINARY_PATH="temp_extract/var/lib/openlist/openlist-desktop"
+
+	if [ ! -f "$$EXTRACTED_BINARY_PATH" ]; then \
+		echo "Error: openlist-desktop binary not found at '$$EXTRACTED_BINARY_PATH' after extraction"; \
 		echo "Contents of extraction directory:"; \
 		find temp_extract/ -type f -exec ls -la {} \; || echo "Directory is empty"; \
-		echo "Checking what was in the archive:"; \
-		tar -tzf "OpenList-Desktop-$(DEB_HOST_ARCH).tar.gz" || echo "Cannot list archive contents"; \
 		exit 1; \
 	fi
+
+	# Create the directory structure for the new package
 	mkdir -p debian/openlist-desktop/var/lib/openlist
 	mkdir -p debian/openlist-desktop/usr/bin
 	mkdir -p debian/openlist-desktop/usr/lib/systemd/system
-	cp temp_extract/openlist-desktop debian/openlist-desktop/var/lib/openlist/
+
+	# Copy the extracted binary to the new package structure
+	cp "$$EXTRACTED_BINARY_PATH" debian/openlist-desktop/var/lib/openlist/
 	chmod +x debian/openlist-desktop/var/lib/openlist/openlist-desktop
+
+	# Copy the service file
 	cp debian/openlist.service debian/openlist-desktop/usr/lib/systemd/system/
+
+	# Create the wrapper script in /usr/bin
 	echo '#!/bin/bash' > debian/openlist-desktop/usr/bin/openlist-desktop
 	echo '# OpenList Desktop wrapper script' >> debian/openlist-desktop/usr/bin/openlist-desktop
 	echo '# Automatically adds --force-bin-dir to all commands' >> debian/openlist-desktop/usr/bin/openlist-desktop
@@ -80,7 +87,11 @@ override_dh_auto_install:
 	echo '    exec "$$BINARY" "$$@"' >> debian/openlist-desktop/usr/bin/openlist-desktop
 	echo 'fi' >> debian/openlist-desktop/usr/bin/openlist-desktop
 	chmod +x debian/openlist-desktop/usr/bin/openlist-desktop
+
+	# Clean up temporary files
 	rm -rf temp_extract
+	rm -f "$$DEB_FILE_NAME"
+
 	@echo "Files installed to package directory:"
 	@find debian/openlist-desktop -type f -exec ls -la {} \;
 	@echo "Wrapper script content:"
@@ -121,3 +132,4 @@ override_dh_auto_clean:
 
 override_dh_auto_test:
 	@echo "Skipping tests for cross-compilation"
+
